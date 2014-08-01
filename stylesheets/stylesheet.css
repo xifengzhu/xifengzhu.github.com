@@ -255,11 +255,11 @@ form {
   padding: 20px;
 }
 
-ul{
-  li{
-    padding: 20px 0, 20px, 0!important;
-  }
+
+li{
+  padding: 20px 0, 20px, 0!important;
 }
+
 
 /*******************************************************************************
 Full-Width Styles
