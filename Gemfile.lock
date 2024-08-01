@@ -269,7 +269,6 @@ PLATFORMS
 DEPENDENCIES
   github-pages
   http_parser.rb (~> 0.6.0)
-  jekyll (~> 3.9.5)
   jekyll-feed (~> 0.6)
   jekyll-paginate (~> 1.1.0)
   jekyll-sitemap
