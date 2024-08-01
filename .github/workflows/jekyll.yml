@@ -1,17 +1,22 @@
+name: Jekyll Site CI
+
+on:
+  push:
+    branches:
+      - master  # 或者你设置的默认分支
+
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout Repo
+        uses: actions/checkout@v2
 
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: '3.0.2'
-
-      - name: Clear Bundler Cache
-        run: bundle clean --force
+          ruby-version: '3.0.2'  # 确保使用你本地使用的 Ruby 版本
 
       - name: Install Dependencies
         run: |
