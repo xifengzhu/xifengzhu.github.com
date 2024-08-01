@@ -18,21 +18,21 @@ background: '/assets/images/bg-post.jpg'
 ## 常见架构模式
 
 ### 最简单的架构
-![elk-simple.png](/blog/assets/images/elk-simple.png)
+![elk-simple.png](/assets/images/elk-simple.png)
 在这种架构中，只有一个  `Logstash`、`Elasticsearch` 和 `Kibana `实例。`Logstash` 通过输入插件从多种数据源（比如日志文件、标准输入 `Stdin` 等）获取数据，再经过滤插件加工数据，然后经 `Elasticsearch` 输出插件输出到 `Elasticsearch`，通过 `Kibana`展示。这种架构适合初学者学习 `ELK` 的工作模式，搭建最简单的工作模式。
 
 ### Logstash 作为日志搜索器
-![elk-logstash.png](/blog/assets/images/elk-logstash.png)
+![elk-logstash.png](/assets/images/elk-logstash.png)
 这种架构是对上面架构的扩展，把一个 `Logstash` 数据搜集节点扩展到多个，分布于多台机器，将解析好的数据发送到 `Elasticsearch server` 进行存储，最后在 `Kibana` 查询、生成日志报表等。
 
 这种架构在日常中应用的比较少；因为需要在各个服务器上部署 Logstash，而它比较消耗 CPU 和内存资源，所以比较适合计算资源丰富的服务器，否则容易造成服务器性能下降，甚至可能导致无法正常工作。
 
 ### 使用 `filebeat` 作为日志收集器
-![elk-filebeat.png](/blog/assets/images/elk-filebeat.png)
+![elk-filebeat.png](/assets/images/elk-filebeat.png)
 这种架构是对上面架构的优化，`filebeat`比 `logstash` 更轻量，占用资源更少，通过`filebeat`采集日志，经`logstash`处理之后传递给`Elasticsearch`，通过 `Kibana` 展示。
 
 ### 引入消息队列,将ES做成集群
-![elk-cluster.png](/blog/assets/images/elk-cluster.png)
+![elk-cluster.png](/assets/images/elk-cluster.png)
 一些大型项目日志访问频繁，产生的日志文件比较多，对日志的分析要求较高，对稳定性与可靠性要求较高，可以在 `filebeat` 与 `logstash` 之间插入一层队列, 先将数据传递给消息队列，然后通过 `logstash` 拉取消息队列数据, 处理之后传递给ES集群处理。
 
 ## 为Rails应用集群增加ELK

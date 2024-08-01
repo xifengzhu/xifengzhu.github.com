@@ -55,7 +55,7 @@ check process example_unicorn
   stop program = "/etc/init.d/example_unicorn stop" as uid root and gid root
 ```
 
-如何制作 `example_unicorn` service 请见 [Unicorn auto start after server boot](/blog/2017/08/26/unicorn-auto-start-after-server-boot.html)
+如何制作 `example_unicorn` service 请见 [Unicorn auto start after server boot](/2017/08/26/unicorn-auto-start-after-server-boot.html)
 
 并且新建一个软连接：
 
@@ -72,4 +72,4 @@ ln -s /etc/monit/conf-available/www.example.com /etc/monit/conf-enabled/www.exam
 ### 参考
 * [Monit 官网](https://mmonit.com/monit/)
 * [How To Install and Configure Monit](https://www.digitalocean.com/community/tutorials/how-to-install-and-configure-monit)
-* [Unicorn auto start after server boot](http://xifengzhu.github.io/blog/2017/08/26/unicorn-auto-start-after-server-boot.html)
+* [Unicorn auto start after server boot](http://xifengzhu.github.io/2017/08/26/unicorn-auto-start-after-server-boot.html)
