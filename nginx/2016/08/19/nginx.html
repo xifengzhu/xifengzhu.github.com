@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+  <title>
+    nginx - 夕枫主&#39;s blog
+    
+  </title>
+
+  <meta name="description" content="最近项目遇到比较坑爹的一种情况： 服务器已经好了，但是备案没有通过,80端口就不能用，而且因为代码是别人写的，做了很多的访问域名限制，不能通过IP访问，这个时候又需要向客户展示进度，让她们能通过某个域名访问网站。">
+
+  <link href='https://fonts.googleapis.com/css?family=Lora:400,700,400italic,700italic' rel='stylesheet' type='text/css'>
+  <link href='https://fonts.googleapis.com/css?family=Open+Sans:300italic,400italic,600italic,700italic,800italic,400,300,600,700,800' rel='stylesheet' type='text/css'>
+
+  <script src="https://use.fontawesome.com/releases/v5.15.3/js/all.js" crossorigin="anonymous"></script>
+
+  <link rel="stylesheet" href="/assets/main.css">
+  <link rel="canonical" href="xifengzhu.github.com/nginx/2016/08/19/nginx.html">
+  <link rel="alternate" type="application/rss+xml" title="夕枫主&#39;s blog" href="/feed.xml">
+
+</head>
+
+
+<body>
+
+  <!-- Navigation -->
+<nav class="navbar navbar-expand-lg navbar-light fixed-top" id="mainNav">
+    <div class="container">
+      <a class="navbar-brand" href="/">夕枫主&#39;s blog</a>
+      <button class="navbar-toggler navbar-toggler-right" type="button" data-toggle="collapse" data-target="#navbarResponsive" aria-controls="navbarResponsive" aria-expanded="false" aria-label="Toggle navigation">
+        Menu
+        <i class="fa fa-bars"></i>
+      </button>
+      <div class="collapse navbar-collapse" id="navbarResponsive">
+        <ul class="navbar-nav ml-auto">
+          <li class="nav-item">
+            <a class="nav-link" href="/">Home</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="/posts">Posts</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="/about">About</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Page Header -->
+
+<header class="masthead" style="background-image: url('/assets/images/bg-post.jpg')">
+  
+    <div class="overlay"></div>
+    <div class="container">
+      <div class="row">
+        <div class="col-lg-8 col-md-10 mx-auto">
+          <div class="post-heading">
+            <h1>nginx</h1>
+            
+            <span class="meta">
+              August 19, 2016 &middot; <span class="reading-time" title="Estimated read time">
+  
+   1 min  read </span>
+
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="row">
+      <div class="col-lg-8 col-md-10 mx-auto">
+
+        <p>最近项目遇到比较坑爹的一种情况：
+服务器已经好了，但是备案没有通过,80端口就不能用，而且因为代码是别人写的，做了很多的访问域名限制，不能通过IP访问，这个时候又需要向客户展示进度，让她们能通过某个域名访问网站。</p>
+
+<p>首先我们想到了一种解决方案：
+那就是改host(因为代码中配置三个二级域名，所以这里会有三个)，将本地某个访问域名指向我们的服务器</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>xx.xxx.xxx.xx   apistaging.example.cn
+xx.xxx.xxx.xx   developers.staging.example.cn
+xx.xxx.xxx.xx   staging.example.cn
+</code></pre></div></div>
+
+<p>这样就存在一个问题，那就是每个人都需要改动本地host才能访问到服务器。然后甲方会告诉你： 我不懂电脑，不懂怎么改host，我就想简单点，直接访问就好了，你们想方案吧。</p>
+
+<p>于是第二个方案出炉了：
+做一个反向代理，在我们的一个中间的服务器上跑一个nginx代理服务，通过它去访问服务器，这样只要在一台机器上配置host跟nginx就好了。于是一下配置产生了，因为代码中控制了跳转整个网站的域名，所以这份配置看起来跟其他正常配置会有所不同，不完全适合其他项目。</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>server {
+   listen       80;
+   server_name  visit_url;
+   location = / {
+      rewrite ^/ visit_url/zh-CN;
+   }
+    location / {
+       proxy_set_header Host visit_url:3000;
+       proxy_set_header X-Forwarded-For $remote_addr;
+       proxy_set_header X-Real-IP $remote_addr;
+       proxy_pass visit_url:3000;
+       proxy_next_upstream error;
+       proxy_redirect     off;
+   }
+ }
+</code></pre></div></div>
+
+<p>说道这里，是觉得有点干涩，没啥料，那就加点笔记纪录下学习nginx的过程。</p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code>main
+events   <span class="o">{</span>
+  ....
+<span class="o">}</span>
+http        <span class="o">{</span>
+  ....
+  upstream myproject <span class="o">{</span>
+    .....
+  <span class="o">}</span>
+  server  <span class="o">{</span>
+    ....
+    location <span class="o">{</span>
+        ....
+    <span class="o">}</span>
+  <span class="o">}</span>
+  server  <span class="o">{</span>
+    ....
+    location <span class="o">{</span>
+        ....
+    <span class="o">}</span>
+  <span class="o">}</span>
+  ....
+<span class="o">}</span>
+</code></pre></div></div>
+
+<h3 id="nginx配置文件主要分为六个区域">nginx配置文件主要分为六个区域：</h3>
+
+<ul>
+  <li>main(全局设置)</li>
+  <li>events(nginx工作模式)</li>
+  <li>http(http设置)</li>
+  <li>sever(主机设置)</li>
+  <li>location(URL匹配)</li>
+  <li>upstream(负载均衡服务器设置)</li>
+</ul>
+
+<h3 id="更多资料">更多资料</h3>
+<p>https://www.zybuluo.com/phper/note/89391</p>
+
+
+        <hr>
+
+        <div class="clearfix">
+
+          
+          
+          <a class="btn btn-primary float-right" href="/ruby/2016/12/08/iPhone-direct-image-uploads-always-named-image.html" data-toggle="tooltip" data-placement="top" title="iPhone直接上传图片总是命名为image.jpg的解决方法">Next<span class="d-none d-md-inline">
+              Post</span> &rarr;</a>
+          
+
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+<style>
+    img {
+        max-width: -webkit-fill-available;
+    }
+</style>
+
+  <!-- Footer -->
+
+<hr>
+
+<footer>
+  <div class="container">
+    <div class="row">
+      <div class="col-lg-8 col-md-10 mx-auto">
+        <ul class="list-inline text-center">
+          
+          <li class="list-inline-item">
+            <a href="mailto:xifengzhu520@gmail.com">
+              <span class="fa-stack fa-lg">
+                <i class="fas fa-circle fa-stack-2x"></i>
+                <i class="far fa-envelope fa-stack-1x fa-inverse"></i>
+              </span>
+            </a>
+          </li>
+          
+          
+          <li class="list-inline-item">
+            <a href="https://twitter.com/xifengzhu">
+              <span class="fa-stack fa-lg">
+                <i class="fas fa-circle fa-stack-2x"></i>
+                <i class="fab fa-twitter fa-stack-1x fa-inverse"></i>
+              </span>
+            </a>
+          </li>
+          
+          
+          
+          
+          <li class="list-inline-item">
+            <a href="https://github.com/xifengzhu">
+              <span class="fa-stack fa-lg">
+                <i class="fas fa-circle fa-stack-2x"></i>
+                <i class="fab fa-github fa-stack-1x fa-inverse"></i>
+              </span>
+            </a>
+          </li>
+          
+          
+        </ul>
+        <p class="copyright text-muted">Copyright &copy; xifengzhu 2024</p>
+      </div>
+    </div>
+  </div>
+</footer>
+
+
+  <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/assets/vendor/startbootstrap-clean-blog/js/scripts.js"></script>
+
+<script src="/assets/scripts.js"></script>
+
+
+
+
+  <!-- Global site tag (gtag.js) - Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id="></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', '');
+</script>
+
+
+
+</body>
+
+</html>

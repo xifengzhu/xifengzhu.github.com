@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+  <title>
+    微信小程序用 web socket 和 rails 的 Action Cable 通讯 - 夕枫主&#39;s blog
+    
+  </title>
+
+  <meta name="description" content="最近在做一个商品竞拍的需求，考虑到需要使用微信小程序的 web socket跟rails 的 Action Cable。做了以下尝试，将踩坑的过程记录下来。">
+
+  <link href='https://fonts.googleapis.com/css?family=Lora:400,700,400italic,700italic' rel='stylesheet' type='text/css'>
+  <link href='https://fonts.googleapis.com/css?family=Open+Sans:300italic,400italic,600italic,700italic,800italic,400,300,600,700,800' rel='stylesheet' type='text/css'>
+
+  <script src="https://use.fontawesome.com/releases/v5.15.3/js/all.js" crossorigin="anonymous"></script>
+
+  <link rel="stylesheet" href="/assets/main.css">
+  <link rel="canonical" href="xifengzhu.github.com/2018/05/06/%E5%BE%AE%E4%BF%A1%E5%B0%8F%E7%A8%8B%E5%BA%8F%E7%94%A8-web-socket-%E5%92%8C-rails-%E7%9A%84-action-cable-%E9%80%9A%E8%AE%AF.html">
+  <link rel="alternate" type="application/rss+xml" title="夕枫主&#39;s blog" href="/feed.xml">
+
+</head>
+
+
+<body>
+
+  <!-- Navigation -->
+<nav class="navbar navbar-expand-lg navbar-light fixed-top" id="mainNav">
+    <div class="container">
+      <a class="navbar-brand" href="/">夕枫主&#39;s blog</a>
+      <button class="navbar-toggler navbar-toggler-right" type="button" data-toggle="collapse" data-target="#navbarResponsive" aria-controls="navbarResponsive" aria-expanded="false" aria-label="Toggle navigation">
+        Menu
+        <i class="fa fa-bars"></i>
+      </button>
+      <div class="collapse navbar-collapse" id="navbarResponsive">
+        <ul class="navbar-nav ml-auto">
+          <li class="nav-item">
+            <a class="nav-link" href="/">Home</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="/posts">Posts</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="/about">About</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Page Header -->
+
+<header class="masthead" style="background-image: url('/assets/images/bg-post.jpg')">
+  
+    <div class="overlay"></div>
+    <div class="container">
+      <div class="row">
+        <div class="col-lg-8 col-md-10 mx-auto">
+          <div class="post-heading">
+            <h1>微信小程序用 web socket 和 rails 的 Action Cable 通讯</h1>
+            
+            <span class="meta">
+              May 06, 2018 &middot; <span class="reading-time" title="Estimated read time">
+  
+   4 mins  read </span>
+
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="row">
+      <div class="col-lg-8 col-md-10 mx-auto">
+
+        <p>最近在做一个商品竞拍的需求，考虑到需要使用微信小程序的 web socket跟rails 的 Action Cable。做了以下尝试，将踩坑的过程记录下来。</p>
+
+<h2 id="建立-rails-action-cable-服务端">建立 rails Action Cable 服务端</h2>
+
+<h3 id="链接设置">链接设置</h3>
+<p>由于小程序端的请求是无状态的，无法发送 <code class="language-plaintext highlighter-rouge">cookie</code> 来鉴权， 所有在请求的时候需要带上一个特殊的 <code class="language-plaintext highlighter-rouge">headers['Authorization']</code>， 后端采用 <code class="language-plaintext highlighter-rouge">jwt</code> 进行鉴权。 具体代码如下：</p>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">module</span> <span class="nn">ApplicationCable</span>
+  <span class="k">class</span> <span class="nc">Connection</span> <span class="o">&lt;</span> <span class="no">ActionCable</span><span class="o">::</span><span class="no">Connection</span><span class="o">::</span><span class="no">Base</span>
+    <span class="n">identified_by</span> <span class="ss">:current_user</span>
+
+    <span class="k">def</span> <span class="nf">connect</span>
+      <span class="nb">self</span><span class="p">.</span><span class="nf">current_user</span> <span class="o">=</span> <span class="n">find_verified_user</span>
+    <span class="k">end</span>
+
+    <span class="kp">private</span>
+    <span class="k">def</span> <span class="nf">find_verified_user</span>
+      <span class="n">token</span> <span class="o">=</span> <span class="n">request</span><span class="p">.</span><span class="nf">headers</span><span class="p">[</span><span class="s1">'Authorization'</span><span class="p">]</span>
+      <span class="k">if</span> <span class="n">token</span>
+        <span class="c1"># jwt authentication</span>
+      <span class="k">else</span>
+        <span class="n">reject_unauthorized_connection</span>
+      <span class="k">end</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+</code></pre></div></div>
+
+<h3 id="设置频道与接收数据处理逻辑">设置频道与接收数据处理逻辑</h3>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">class</span> <span class="nc">AuctionChannel</span> <span class="o">&lt;</span> <span class="no">ApplicationCable</span><span class="o">::</span><span class="no">Channel</span>
+  <span class="c1"># 当用户成为此频道的订阅者时调用</span>
+  <span class="k">def</span> <span class="nf">subscribed</span>
+    <span class="n">stream_from</span> <span class="s2">"auction_channel_</span><span class="si">#{</span><span class="n">params</span><span class="p">[</span><span class="ss">:id</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span>
+  <span class="k">end</span>
+
+  <span class="k">def</span> <span class="nf">unsubscribed</span>
+  <span class="k">end</span>
+
+  <span class="k">def</span> <span class="nf">receive</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+    <span class="c1"># 接收收据处理逻辑</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+</code></pre></div></div>
+
+<h2 id="微信端链接">微信端链接</h2>
+
+<p>建立链接是需要注意的是在 <code class="language-plaintext highlighter-rouge">header</code> 中加上用来做身份鉴定的 <code class="language-plaintext highlighter-rouge">Authorization</code></p>
+
+<p>微信端向服务端发送消息需要将 <code class="language-plaintext highlighter-rouge">command</code> 包装在 <code class="language-plaintext highlighter-rouge">data</code> 参数中，可使用的 <code class="language-plaintext highlighter-rouge">command</code> 有 <code class="language-plaintext highlighter-rouge">[subscribe, message]</code>, 一个用来订阅频道， 一个用来发送消息。</p>
+
+<div class="language-javascript highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">const</span> <span class="nx">initSocket</span> <span class="o">=</span> <span class="k">async</span> <span class="p">()</span> <span class="o">=&gt;</span> <span class="p">{</span>
+  <span class="err">#</span> <span class="nx">建立socket链接</span>
+  <span class="nx">wx</span><span class="p">.</span><span class="nx">connectSocket</span><span class="p">({</span>
+    <span class="na">url</span><span class="p">:</span> <span class="dl">"</span><span class="s2">ws://localhost:3000/cable</span><span class="dl">"</span><span class="p">,</span>
+    <span class="na">header</span><span class="p">:{</span>
+      <span class="dl">'</span><span class="s1">content-type</span><span class="dl">'</span><span class="p">:</span> <span class="dl">'</span><span class="s1">application/json</span><span class="dl">'</span><span class="p">,</span>
+      <span class="dl">'</span><span class="s1">Authorization</span><span class="dl">'</span><span class="p">:</span> <span class="nx">$</span><span class="p">{</span><span class="nx">current_user</span><span class="p">.</span><span class="nx">token</span><span class="p">}</span>
+    <span class="p">},</span>
+    <span class="na">method</span><span class="p">:</span><span class="dl">"</span><span class="s2">GET</span><span class="dl">"</span>
+  <span class="p">});</span>
+
+  <span class="err">#</span> <span class="nx">Rails</span> <span class="nx">的</span> <span class="nx">js</span> <span class="nx">代码对</span> <span class="nx">websocket</span> <span class="nx">进行了一些封装</span><span class="err">，</span><span class="nx">直接用</span> <span class="nx">socket</span> <span class="nx">连到</span> <span class="na">ws</span><span class="p">:</span><span class="c1">//localhost:3000/cable 是收不到消息的，要客户端发送一个 "subscribe" 到 websocket 才可以</span>
+  <span class="nx">wx</span><span class="p">.</span><span class="nx">onSocketOpen</span><span class="p">(</span><span class="kd">function</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kd">const</span> <span class="nx">id</span> <span class="o">=</span> <span class="nx">JSON</span><span class="p">.</span><span class="nx">stringify</span><span class="p">({</span><span class="na">channel</span><span class="p">:</span> <span class="dl">"</span><span class="s2">AuctionChannel</span><span class="dl">"</span><span class="p">,</span> <span class="na">id</span><span class="p">:</span> <span class="nx">$</span><span class="p">{</span><span class="nx">id</span><span class="p">}});</span>
+    <span class="nx">wx</span><span class="p">.</span><span class="nx">sendSocketMessage</span><span class="p">({</span>
+      <span class="na">data</span><span class="p">:</span> <span class="nx">JSON</span><span class="p">.</span><span class="nx">stringify</span><span class="p">({</span><span class="na">command</span><span class="p">:</span> <span class="dl">"</span><span class="s2">subscribe</span><span class="dl">"</span><span class="p">,</span> <span class="na">identifier</span><span class="p">:</span> <span class="na">id</span><span class="p">:</span> <span class="nx">$</span><span class="p">{</span><span class="nx">id</span><span class="p">}}),</span>
+    <span class="p">})</span>
+  <span class="p">});</span>
+
+  <span class="err">#</span> <span class="nx">客户端发送信息到服务端</span>
+  <span class="nx">wx</span><span class="p">.</span><span class="nx">sendSocketMessage</span><span class="p">({</span>
+    <span class="kd">const</span> <span class="nx">id</span> <span class="o">=</span> <span class="nx">JSON</span><span class="p">.</span><span class="nx">stringify</span><span class="p">({</span><span class="na">channel</span><span class="p">:</span> <span class="dl">"</span><span class="s2">AuctionChannel</span><span class="dl">"</span><span class="p">,</span> <span class="na">id</span><span class="p">:</span> <span class="nx">$</span><span class="p">{</span><span class="nx">id</span><span class="p">}});</span>
+    <span class="nl">data</span><span class="p">:</span> <span class="nx">JSON</span><span class="p">.</span><span class="nx">stringify</span><span class="p">({</span>
+      <span class="na">command</span><span class="p">:</span> <span class="dl">'</span><span class="s1">message</span><span class="dl">'</span><span class="p">,</span>
+      <span class="na">data</span><span class="p">:</span> <span class="nx">JSON</span><span class="p">.</span><span class="nx">stringify</span><span class="p">({</span><span class="na">test</span><span class="p">:</span> <span class="dl">'</span><span class="s1">ddd</span><span class="dl">'</span><span class="p">}),</span>
+      <span class="na">identifier</span><span class="p">:</span> <span class="nx">id</span>
+    <span class="p">})</span>
+  <span class="p">})</span>
+
+  <span class="err">#</span> <span class="nx">接受到服务端推送信息处理逻辑</span>
+  <span class="nx">wx</span><span class="p">.</span><span class="nx">onSocketMessage</span><span class="p">(</span><span class="kd">function</span><span class="p">(</span><span class="nx">res</span><span class="p">)</span> <span class="p">{</span>
+    <span class="kd">const</span> <span class="nx">response</span> <span class="o">=</span> <span class="nx">JSON</span><span class="p">.</span><span class="nx">parse</span><span class="p">(</span><span class="nx">res</span><span class="p">.</span><span class="nx">data</span><span class="p">);</span>
+    <span class="k">if</span><span class="p">(</span><span class="nx">response</span><span class="p">.</span><span class="nx">identifier</span> <span class="o">&amp;&amp;</span> <span class="nx">response</span><span class="p">.</span><span class="nx">message</span><span class="p">){</span>
+      <span class="kd">const</span> <span class="nx">auctionRecord</span> <span class="o">=</span> <span class="nx">response</span><span class="p">.</span><span class="nx">message</span><span class="p">;</span>
+      <span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="nx">auctionRecord</span><span class="p">)</span>
+    <span class="p">}</span>
+  <span class="p">});</span>
+
+  <span class="nx">wx</span><span class="p">.</span><span class="nx">onSocketError</span><span class="p">(</span><span class="kd">function</span><span class="p">(</span><span class="nx">res</span><span class="p">){</span>
+    <span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="dl">'</span><span class="s1">WebSocket连接打开失败，请检查！</span><span class="dl">'</span><span class="p">)</span>
+  <span class="p">});</span>
+
+  <span class="nx">wx</span><span class="p">.</span><span class="nx">onSocketClose</span><span class="p">(</span><span class="kd">function</span><span class="p">(</span><span class="nx">res</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="dl">'</span><span class="s1">WebSocket 已关闭！</span><span class="dl">'</span><span class="p">)</span>
+  <span class="p">})</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h2 id="参考">参考</h2>
+<ul>
+  <li><a href="https://ruby-china.github.io/rails-guides/action_cable_overview.html">Action Cable 概览</a></li>
+  <li><a href="https://developers.weixin.qq.com/miniprogram/dev/api/network-socket.html">小程序 WebSocket</a></li>
+</ul>
+
+
+        <hr>
+
+        <div class="clearfix">
+
+          
+          <a class="btn btn-primary float-left" href="/2017/11/17/%E4%BD%BF%E7%94%A8monit-%E7%9B%91%E5%90%AC-unicorn-%E8%BF%9B%E7%A8%8B.html" data-toggle="tooltip" data-placement="top" title="使用Monit 监听 Unicorn 进程">&larr; Previous<span class="d-none d-md-inline">
+              Post</span></a>
+          
+          
+          <a class="btn btn-primary float-right" href="/2018/09/01/%E4%BD%BF%E7%94%A8redis%E5%AD%98%E5%82%A8%E5%BE%AE%E4%BF%A1%E5%B0%8F%E7%A8%8B%E5%BA%8Fform-id.html" data-toggle="tooltip" data-placement="top" title="使用redis存储微信小程序form_id">Next<span class="d-none d-md-inline">
+              Post</span> &rarr;</a>
+          
+
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+<style>
+    img {
+        max-width: -webkit-fill-available;
+    }
+</style>
+
+  <!-- Footer -->
+
+<hr>
+
+<footer>
+  <div class="container">
+    <div class="row">
+      <div class="col-lg-8 col-md-10 mx-auto">
+        <ul class="list-inline text-center">
+          
+          <li class="list-inline-item">
+            <a href="mailto:xifengzhu520@gmail.com">
+              <span class="fa-stack fa-lg">
+                <i class="fas fa-circle fa-stack-2x"></i>
+                <i class="far fa-envelope fa-stack-1x fa-inverse"></i>
+              </span>
+            </a>
+          </li>
+          
+          
+          <li class="list-inline-item">
+            <a href="https://twitter.com/xifengzhu">
+              <span class="fa-stack fa-lg">
+                <i class="fas fa-circle fa-stack-2x"></i>
+                <i class="fab fa-twitter fa-stack-1x fa-inverse"></i>
+              </span>
+            </a>
+          </li>
+          
+          
+          
+          
+          <li class="list-inline-item">
+            <a href="https://github.com/xifengzhu">
+              <span class="fa-stack fa-lg">
+                <i class="fas fa-circle fa-stack-2x"></i>
+                <i class="fab fa-github fa-stack-1x fa-inverse"></i>
+              </span>
+            </a>
+          </li>
+          
+          
+        </ul>
+        <p class="copyright text-muted">Copyright &copy; xifengzhu 2024</p>
+      </div>
+    </div>
+  </div>
+</footer>
+
+
+  <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/assets/vendor/startbootstrap-clean-blog/js/scripts.js"></script>
+
+<script src="/assets/scripts.js"></script>
+
+
+
+
+  <!-- Global site tag (gtag.js) - Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id="></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', '');
+</script>
+
+
+
+</body>
+
+</html>

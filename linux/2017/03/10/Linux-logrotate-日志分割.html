@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+  <title>
+    Linux logrotate 日志分割 - 夕枫主&#39;s blog
+    
+  </title>
+
+  <meta name="description" content="Rails在默认情况下会将系统日志全部写在一个文件里，这样当服务器跑的时间比较久之后，日志文件就会变得比较大，而且出了错误，也不方便排查。">
+
+  <link href='https://fonts.googleapis.com/css?family=Lora:400,700,400italic,700italic' rel='stylesheet' type='text/css'>
+  <link href='https://fonts.googleapis.com/css?family=Open+Sans:300italic,400italic,600italic,700italic,800italic,400,300,600,700,800' rel='stylesheet' type='text/css'>
+
+  <script src="https://use.fontawesome.com/releases/v5.15.3/js/all.js" crossorigin="anonymous"></script>
+
+  <link rel="stylesheet" href="/assets/main.css">
+  <link rel="canonical" href="xifengzhu.github.com/linux/2017/03/10/Linux-logrotate-%E6%97%A5%E5%BF%97%E5%88%86%E5%89%B2.html">
+  <link rel="alternate" type="application/rss+xml" title="夕枫主&#39;s blog" href="/feed.xml">
+
+</head>
+
+
+<body>
+
+  <!-- Navigation -->
+<nav class="navbar navbar-expand-lg navbar-light fixed-top" id="mainNav">
+    <div class="container">
+      <a class="navbar-brand" href="/">夕枫主&#39;s blog</a>
+      <button class="navbar-toggler navbar-toggler-right" type="button" data-toggle="collapse" data-target="#navbarResponsive" aria-controls="navbarResponsive" aria-expanded="false" aria-label="Toggle navigation">
+        Menu
+        <i class="fa fa-bars"></i>
+      </button>
+      <div class="collapse navbar-collapse" id="navbarResponsive">
+        <ul class="navbar-nav ml-auto">
+          <li class="nav-item">
+            <a class="nav-link" href="/">Home</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="/posts">Posts</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="/about">About</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Page Header -->
+
+<header class="masthead" style="background-image: url('/assets/images/bg-post.jpg')">
+  
+    <div class="overlay"></div>
+    <div class="container">
+      <div class="row">
+        <div class="col-lg-8 col-md-10 mx-auto">
+          <div class="post-heading">
+            <h1>Linux logrotate 日志分割</h1>
+            
+            <span class="meta">
+              March 10, 2017 &middot; <span class="reading-time" title="Estimated read time">
+  
+   1 min  read </span>
+
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="row">
+      <div class="col-lg-8 col-md-10 mx-auto">
+
+        <p>Rails在默认情况下会将系统日志全部写在一个文件里，这样当服务器跑的时间比较久之后，日志文件就会变得比较大，而且出了错误，也不方便排查。</p>
+
+<p>logrotate就是管理这些日志文件的神器，可以对单个日志文件或者某个目录下的文件按时间/大小进行切割，压缩操作；指定日志保存数量；还可以在切割之后运行自定义命令。</p>
+
+<h5 id="logrotate-分割日志原理">logrotate 分割日志原理</h5>
+<p>系统会按照计划的频率运行logrotate，logrotate需要的cron任务应该在安装时就自动创建了。可以使用以下命令查看</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cat /etc/cron.daily/logrotate
+</code></pre></div></div>
+
+<h5 id="logrotateconf-主配置文件">logrotate.conf 主配置文件</h5>
+<p>logrotate的主要配置文件位于 /etc/logrotate.conf ，在这个文件中有一行需要特别注意一下, 这个目录就是各软件使用logrotate分割日志文件所使用的配置文件</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>include /etc/logrotate.d
+</code></pre></div></div>
+
+<h5 id="logrotated-配置文件目录">logrotate.d 配置文件目录</h5>
+<p>例如：</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>drwxr-xr-x  2 root root 4096 Mar 10 09:52 ./
+drwxr-xr-x 96 root root 4096 Jan 21 11:02 ../
+<span class="nt">-rw-r--r--</span>  1 root root  174 Mar 10 09:52 724activity
+<span class="nt">-rw-r--r--</span>  1 root root  173 Apr 10  2014 apt
+<span class="nt">-rw-r--r--</span>  1 root root   79 Feb 18  2014 aptitude
+<span class="nt">-rw-r--r--</span>  1 root root  232 Mar  7  2014 dpkg
+<span class="nt">-rw-r--r--</span>  1 root root  847 Oct 25 04:08 mysql-server
+<span class="nt">-rw-r--r--</span>  1 root root   94 Jan 23  2013 ppp
+<span class="nt">-rw-r--r--</span>  1 root root  126 Jan 15  2014 redis-server
+<span class="nt">-rw-r--r--</span>  1 root root  515 Dec  4  2013 rsyslog
+<span class="nt">-rw-r--r--</span>  1 root root  178 Mar  1  2014 ufw
+<span class="nt">-rw-r--r--</span>  1 root root  122 Apr 12  2014 upstart
+</code></pre></div></div>
+
+<h5 id="配置自定义需要切割的文件">配置自定义需要切割的文件</h5>
+<p>直接去 /etc/logrotate.d 下随便复制一个文件，改名，然后直接进去看一下当中的英文，改一下内容即可</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>/var/www/ruby-china/current/log/<span class="k">*</span>.log <span class="o">{</span>
+  daily
+  missingok
+  rotate 7
+  compress
+  dateext
+  delaycompress
+  lastaction
+    <span class="nv">pid</span><span class="o">=</span>/data/www/ruby-china/current/tmp/pids/unicorn.pid
+    <span class="nb">sudo test</span> <span class="nt">-s</span> <span class="nv">$pid</span> <span class="o">&amp;&amp;</span> <span class="nb">sudo kill</span> <span class="nt">-USR1</span> <span class="s2">"</span><span class="si">$(</span><span class="nb">cat</span> <span class="nv">$pid</span><span class="si">)</span><span class="s2">"</span>
+  endscript
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>设定好之后，可以等明天，或是执行
+<code class="language-plaintext highlighter-rouge">logrotate -f /etc/logrotate.conf</code> 看看。</p>
+
+<h5 id="logrotate-参数说明">logrotate 参数说明</h5>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>1. daily 表示每天整理，也可以改成 weekly 或 monthly
+2. dateext 表示檔案補上 rotate 的日期
+3. missingok 表示如果找不到 log 檔也沒關係
+4. rotate 7 表示保留7份
+5. compress 表示壓縮起來，預設用 gzip。不過如果硬碟空間多，不壓也沒關係。
+6. delaycompress 表示延後壓縮直到下一次 rotate
+7. notifempty 表示如果 log 檔是空的，就不 rotate
+8. copytruncate 先複製 log 檔的內容後，在清空的作法，因為有些程式一定 log 在本來的檔名，例如 rails。另一種方法是 create。
+</code></pre></div></div>
+
+
+        <hr>
+
+        <div class="clearfix">
+
+          
+          <a class="btn btn-primary float-left" href="/ruby/2016/12/08/iPhone-direct-image-uploads-always-named-image.html" data-toggle="tooltip" data-placement="top" title="iPhone直接上传图片总是命名为image.jpg的解决方法">&larr; Previous<span class="d-none d-md-inline">
+              Post</span></a>
+          
+          
+          <a class="btn btn-primary float-right" href="/%E5%89%8D%E7%AB%AF/2017/04/22/%E5%BE%AE%E4%BF%A1%E5%B0%8F%E7%A8%8B%E5%BA%8F%E5%85%A5%E9%97%A8.html" data-toggle="tooltip" data-placement="top" title="10分钟入门微信小程序开发">Next<span class="d-none d-md-inline">
+              Post</span> &rarr;</a>
+          
+
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+<style>
+    img {
+        max-width: -webkit-fill-available;
+    }
+</style>
+
+  <!-- Footer -->
+
+<hr>
+
+<footer>
+  <div class="container">
+    <div class="row">
+      <div class="col-lg-8 col-md-10 mx-auto">
+        <ul class="list-inline text-center">
+          
+          <li class="list-inline-item">
+            <a href="mailto:xifengzhu520@gmail.com">
+              <span class="fa-stack fa-lg">
+                <i class="fas fa-circle fa-stack-2x"></i>
+                <i class="far fa-envelope fa-stack-1x fa-inverse"></i>
+              </span>
+            </a>
+          </li>
+          
+          
+          <li class="list-inline-item">
+            <a href="https://twitter.com/xifengzhu">
+              <span class="fa-stack fa-lg">
+                <i class="fas fa-circle fa-stack-2x"></i>
+                <i class="fab fa-twitter fa-stack-1x fa-inverse"></i>
+              </span>
+            </a>
+          </li>
+          
+          
+          
+          
+          <li class="list-inline-item">
+            <a href="https://github.com/xifengzhu">
+              <span class="fa-stack fa-lg">
+                <i class="fas fa-circle fa-stack-2x"></i>
+                <i class="fab fa-github fa-stack-1x fa-inverse"></i>
+              </span>
+            </a>
+          </li>
+          
+          
+        </ul>
+        <p class="copyright text-muted">Copyright &copy; xifengzhu 2024</p>
+      </div>
+    </div>
+  </div>
+</footer>
+
+
+  <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/assets/vendor/startbootstrap-clean-blog/js/scripts.js"></script>
+
+<script src="/assets/scripts.js"></script>
+
+
+
+
+  <!-- Global site tag (gtag.js) - Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id="></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', '');
+</script>
+
+
+
+</body>
+
+</html>

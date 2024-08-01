@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+  <title>
+    ELK 套件分析集群Rails Application日志 - 夕枫主&#39;s blog
+    
+  </title>
+
+  <meta name="description" content="随着系统访问量的增大，集群化的部署方式使得每个 rails log 文件都是写在各自的服务器硬盘上，这给排查错误造成很大的困扰，只能挨个服务器去找日志信息。 这个时候就需要一个工具来将日志收集起来统一处理。ELK 就是一个很好的日志处理分析工具。">
+
+  <link href='https://fonts.googleapis.com/css?family=Lora:400,700,400italic,700italic' rel='stylesheet' type='text/css'>
+  <link href='https://fonts.googleapis.com/css?family=Open+Sans:300italic,400italic,600italic,700italic,800italic,400,300,600,700,800' rel='stylesheet' type='text/css'>
+
+  <script src="https://use.fontawesome.com/releases/v5.15.3/js/all.js" crossorigin="anonymous"></script>
+
+  <link rel="stylesheet" href="/assets/main.css">
+  <link rel="canonical" href="xifengzhu.github.com/2019/03/04/ELK-%E5%A5%97%E4%BB%B6%E5%88%86%E6%9E%90%E9%9B%86%E7%BE%A4Rails-Application%E6%97%A5%E5%BF%97.html">
+  <link rel="alternate" type="application/rss+xml" title="夕枫主&#39;s blog" href="/feed.xml">
+
+</head>
+
+
+<body>
+
+  <!-- Navigation -->
+<nav class="navbar navbar-expand-lg navbar-light fixed-top" id="mainNav">
+    <div class="container">
+      <a class="navbar-brand" href="/">夕枫主&#39;s blog</a>
+      <button class="navbar-toggler navbar-toggler-right" type="button" data-toggle="collapse" data-target="#navbarResponsive" aria-controls="navbarResponsive" aria-expanded="false" aria-label="Toggle navigation">
+        Menu
+        <i class="fa fa-bars"></i>
+      </button>
+      <div class="collapse navbar-collapse" id="navbarResponsive">
+        <ul class="navbar-nav ml-auto">
+          <li class="nav-item">
+            <a class="nav-link" href="/">Home</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="/posts">Posts</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="/about">About</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Page Header -->
+
+<header class="masthead" style="background-image: url('/assets/images/bg-post.jpg')">
+  
+    <div class="overlay"></div>
+    <div class="container">
+      <div class="row">
+        <div class="col-lg-8 col-md-10 mx-auto">
+          <div class="post-heading">
+            <h1>ELK 套件分析集群Rails Application日志</h1>
+            
+            <span class="meta">
+              March 04, 2019 &middot; <span class="reading-time" title="Estimated read time">
+  
+   5 mins  read </span>
+
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="row">
+      <div class="col-lg-8 col-md-10 mx-auto">
+
+        <p>随着系统访问量的增大，集群化的部署方式使得每个 <code class="language-plaintext highlighter-rouge">rails log</code> 文件都是写在各自的服务器硬盘上，这给排查错误造成很大的困扰，只能挨个服务器去找日志信息。 这个时候就需要一个工具来将日志收集起来统一处理。ELK 就是一个很好的日志处理分析工具。</p>
+
+<h2 id="elk-简介">ELK 简介</h2>
+<p><code class="language-plaintext highlighter-rouge">ELK</code> 是 <code class="language-plaintext highlighter-rouge">Elasticsearch</code>、<code class="language-plaintext highlighter-rouge">Logstash</code> 和 <code class="language-plaintext highlighter-rouge">Kibana </code>三种软件产品的首字母缩写。这三者都是开源软件，通常配合使用，而且又先后归于 <code class="language-plaintext highlighter-rouge">Elastic.co</code> 公司名下，所以被简称为 <code class="language-plaintext highlighter-rouge">ELK Stack</code>。根据 <code class="language-plaintext highlighter-rouge">Google Trend</code> 的信息显示，<code class="language-plaintext highlighter-rouge">ELK Stack</code> 已经成为目前最流行的集中式日志解决方案。</p>
+
+<ul>
+  <li>Elasticsearch：分布式搜索和分析引擎，具有高可伸缩、高可靠和易管理等特点。基于 Apache Lucene 构建，能对大容量的数据进行接近实时的存储、搜索和分析操作。通常被用作某些应用的基础搜索引擎，使其具有复杂的搜索功能；</li>
+  <li>Logstash：数据收集引擎。它支持动态的从各种数据源搜集数据，并对数据进行过滤、分析、丰富、统一格式等操作，然后存储到用户指定的位置；</li>
+  <li>Kibana：数据分析和可视化平台。通常与 Elasticsearch 配合使用，对其中数据进行搜索、分析和以统计图表的方式展示；</li>
+  <li>Filebeat：轻量级开源日志文件数据搜集器。在需要采集日志数据的 server 上安装 Filebeat，并指定日志目录或日志文件后，Filebeat 就能读取数据，迅速发送到 Logstash 进行解析，亦或直接发送到 Elasticsearch 进行集中式存储和分析。</li>
+</ul>
+
+<h2 id="常见架构模式">常见架构模式</h2>
+
+<h3 id="最简单的架构">最简单的架构</h3>
+<p><img src="/assets/images/elk-simple.png" alt="elk-simple.png" />
+在这种架构中，只有一个  <code class="language-plaintext highlighter-rouge">Logstash</code>、<code class="language-plaintext highlighter-rouge">Elasticsearch</code> 和 <code class="language-plaintext highlighter-rouge">Kibana </code>实例。<code class="language-plaintext highlighter-rouge">Logstash</code> 通过输入插件从多种数据源（比如日志文件、标准输入 <code class="language-plaintext highlighter-rouge">Stdin</code> 等）获取数据，再经过滤插件加工数据，然后经 <code class="language-plaintext highlighter-rouge">Elasticsearch</code> 输出插件输出到 <code class="language-plaintext highlighter-rouge">Elasticsearch</code>，通过 <code class="language-plaintext highlighter-rouge">Kibana</code>展示。这种架构适合初学者学习 <code class="language-plaintext highlighter-rouge">ELK</code> 的工作模式，搭建最简单的工作模式。</p>
+
+<h3 id="logstash-作为日志搜索器">Logstash 作为日志搜索器</h3>
+<p><img src="/assets/images/elk-logstash.png" alt="elk-logstash.png" />
+这种架构是对上面架构的扩展，把一个 <code class="language-plaintext highlighter-rouge">Logstash</code> 数据搜集节点扩展到多个，分布于多台机器，将解析好的数据发送到 <code class="language-plaintext highlighter-rouge">Elasticsearch server</code> 进行存储，最后在 <code class="language-plaintext highlighter-rouge">Kibana</code> 查询、生成日志报表等。</p>
+
+<p>这种架构在日常中应用的比较少；因为需要在各个服务器上部署 Logstash，而它比较消耗 CPU 和内存资源，所以比较适合计算资源丰富的服务器，否则容易造成服务器性能下降，甚至可能导致无法正常工作。</p>
+
+<h3 id="使用-filebeat-作为日志收集器">使用 <code class="language-plaintext highlighter-rouge">filebeat</code> 作为日志收集器</h3>
+<p><img src="/assets/images/elk-filebeat.png" alt="elk-filebeat.png" />
+这种架构是对上面架构的优化，<code class="language-plaintext highlighter-rouge">filebeat</code>比 <code class="language-plaintext highlighter-rouge">logstash</code> 更轻量，占用资源更少，通过<code class="language-plaintext highlighter-rouge">filebeat</code>采集日志，经<code class="language-plaintext highlighter-rouge">logstash</code>处理之后传递给<code class="language-plaintext highlighter-rouge">Elasticsearch</code>，通过 <code class="language-plaintext highlighter-rouge">Kibana</code> 展示。</p>
+
+<h3 id="引入消息队列将es做成集群">引入消息队列,将ES做成集群</h3>
+<p><img src="/assets/images/elk-cluster.png" alt="elk-cluster.png" />
+一些大型项目日志访问频繁，产生的日志文件比较多，对日志的分析要求较高，对稳定性与可靠性要求较高，可以在 <code class="language-plaintext highlighter-rouge">filebeat</code> 与 <code class="language-plaintext highlighter-rouge">logstash</code> 之间插入一层队列, 先将数据传递给消息队列，然后通过 <code class="language-plaintext highlighter-rouge">logstash</code> 拉取消息队列数据, 处理之后传递给ES集群处理。</p>
+
+<h2 id="为rails应用集群增加elk">为Rails应用集群增加ELK</h2>
+
+<h3 id="为项目添加日志解析">为项目添加日志解析</h3>
+
+<ul>
+  <li>添加日志解析的Gem</li>
+</ul>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">gem</span> <span class="s2">"lograge"</span>
+<span class="n">gem</span> <span class="s2">"logstash-event"</span>
+</code></pre></div></div>
+<ul>
+  <li>在 <code class="language-plaintext highlighter-rouge">config/initializers/lograge.rb</code> 配置如下</li>
+</ul>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="no">Rails</span><span class="p">.</span><span class="nf">application</span><span class="p">.</span><span class="nf">configure</span> <span class="k">do</span>
+  <span class="n">config</span><span class="p">.</span><span class="nf">lograge</span><span class="p">.</span><span class="nf">enabled</span> <span class="o">=</span> <span class="kp">true</span>
+  <span class="n">config</span><span class="p">.</span><span class="nf">lograge</span><span class="p">.</span><span class="nf">formatter</span> <span class="o">=</span> <span class="no">Lograge</span><span class="o">::</span><span class="no">Formatters</span><span class="o">::</span><span class="no">Logstash</span><span class="p">.</span><span class="nf">new</span>
+  <span class="n">config</span><span class="p">.</span><span class="nf">lograge</span><span class="p">.</span><span class="nf">keep_original_rails_log</span> <span class="o">=</span> <span class="kp">true</span>
+  <span class="n">config</span><span class="p">.</span><span class="nf">lograge</span><span class="p">.</span><span class="nf">logger</span> <span class="o">=</span> <span class="no">ActiveSupport</span><span class="o">::</span><span class="no">Logger</span><span class="p">.</span><span class="nf">new</span> <span class="s2">"</span><span class="si">#{</span><span class="no">Rails</span><span class="p">.</span><span class="nf">root</span><span class="si">}</span><span class="s2">/log/lograge_</span><span class="si">#{</span><span class="no">Rails</span><span class="p">.</span><span class="nf">env</span><span class="si">}</span><span class="s2">.log"</span>
+<span class="k">end</span>
+</code></pre></div></div>
+<p>如果使用 <code class="language-plaintext highlighter-rouge">grape</code>，grape的日志并不会写入文件中需要另外处理</p>
+<ul>
+  <li>添加 <code class="language-plaintext highlighter-rouge">gem grape_logging</code> 到gemfile</li>
+  <li>在 api.rb 中添加如下代码</li>
+</ul>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">class</span> <span class="nc">API</span> <span class="o">&lt;</span> <span class="no">Grape</span><span class="o">::</span><span class="no">API</span>
+  <span class="n">use</span> <span class="no">GrapeLogging</span><span class="o">::</span><span class="no">Middleware</span><span class="o">::</span><span class="no">RequestLogger</span><span class="p">,</span>
+      <span class="ss">instrumentation_key: </span><span class="s1">'api'</span><span class="p">,</span>
+      <span class="ss">include: </span><span class="p">[</span>
+        <span class="no">GrapeLogging</span><span class="o">::</span><span class="no">Loggers</span><span class="o">::</span><span class="no">Response</span><span class="p">.</span><span class="nf">new</span><span class="p">,</span>
+        <span class="no">GrapeLogging</span><span class="o">::</span><span class="no">Loggers</span><span class="o">::</span><span class="no">FilterParameters</span><span class="p">.</span><span class="nf">new</span><span class="p">,</span>
+        <span class="no">GrapeLogging</span><span class="o">::</span><span class="no">Loggers</span><span class="o">::</span><span class="no">ClientEnv</span><span class="p">.</span><span class="nf">new</span><span class="p">,</span>
+        <span class="no">GrapeLogging</span><span class="o">::</span><span class="no">Loggers</span><span class="o">::</span><span class="no">RequestHeaders</span><span class="p">.</span><span class="nf">new</span>
+      <span class="p">]</span>
+  <span class="o">...</span>
+<span class="k">end</span>
+</code></pre></div></div>
+
+<ul>
+  <li>在 <code class="language-plaintext highlighter-rouge">config/initializers/instrumentation.rb</code> 配置如下, 将日志按照格式发给Lograge</li>
+</ul>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># Subscribe to grape request and log with a logger dedicated to Grape</span>
+<span class="no">ActiveSupport</span><span class="o">::</span><span class="no">Notifications</span><span class="p">.</span><span class="nf">subscribe</span><span class="p">(</span><span class="s1">'api'</span><span class="p">)</span> <span class="k">do</span> <span class="o">|</span><span class="nb">name</span><span class="p">,</span> <span class="n">starts</span><span class="p">,</span> <span class="n">ends</span><span class="p">,</span> <span class="n">notification_id</span><span class="p">,</span> <span class="n">payload</span><span class="o">|</span>
+  <span class="n">info</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="ss">name: </span><span class="nb">name</span><span class="p">,</span>
+    <span class="ss">status: </span><span class="n">payload</span><span class="p">[</span><span class="ss">:status</span><span class="p">],</span>
+    <span class="ss">method: </span><span class="n">payload</span><span class="p">[</span><span class="ss">:method</span><span class="p">],</span>
+    <span class="ss">path: </span><span class="n">payload</span><span class="p">[</span><span class="ss">:path</span><span class="p">],</span>
+    <span class="ss">params: </span><span class="n">payload</span><span class="p">[</span><span class="ss">:params</span><span class="p">],</span>
+    <span class="ss">host: </span><span class="n">payload</span><span class="p">[</span><span class="ss">:host</span><span class="p">],</span>
+    <span class="ss">db: </span><span class="n">payload</span><span class="p">[</span><span class="ss">:time</span><span class="p">][</span><span class="ss">:db</span><span class="p">],</span>
+    <span class="ss">view: </span><span class="n">payload</span><span class="p">[</span><span class="ss">:time</span><span class="p">][</span><span class="ss">:view</span><span class="p">],</span>
+    <span class="ss">total: </span><span class="n">payload</span><span class="p">[</span><span class="ss">:time</span><span class="p">][</span><span class="ss">:total</span><span class="p">],</span>
+    <span class="ss">remote_ip: </span><span class="n">payload</span><span class="p">[</span><span class="ss">:ip</span><span class="p">],</span>
+    <span class="ss">format: </span><span class="s2">"json"</span><span class="p">,</span>
+    <span class="ss">user_agent: </span><span class="n">payload</span><span class="p">[</span><span class="ss">:ua</span><span class="p">],</span>
+    <span class="ss">origin: </span><span class="n">payload</span><span class="p">[</span><span class="ss">:headers</span><span class="p">][</span><span class="s2">"Referer"</span><span class="p">],</span>
+    <span class="ss">logtime: </span><span class="no">Time</span><span class="p">.</span><span class="nf">current</span><span class="p">,</span>
+  <span class="p">}.</span><span class="nf">to_json</span>
+  <span class="no">Lograge</span><span class="p">.</span><span class="nf">logger</span><span class="p">.</span><span class="nf">info</span> <span class="n">info</span>
+<span class="k">end</span>
+</code></pre></div></div>
+
+<h3 id="在集群的各个节点配置日志发送工具-filebeat">在集群的各个节点配置日志发送工具 filebeat</h3>
+<ul>
+  <li>安装 filesbeat   <a href="https://www.elastic.co/guide/en/beats/filebeat/current/filebeat-installation.html">点击教程</a></li>
+  <li><code class="language-plaintext highlighter-rouge">filebeat.yml</code> 主要配置如下</li>
+</ul>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>filebeat.inputs:
+- type: log
+  enabled: true
+  paths:
+    - /var/www/xxx/xxx/log/lograge_production.log
+  fields:
+      appname: appname
+      log_type: application
+      env: production
+  fields_under_root: true
+output.logstash:
+  hosts: [remote_logstash_ip:5044"]
+processors:
+  - add_host_metadata: ~
+  - add_cloud_metadata: ~town-square
+</code></pre></div></div>
+<p><strong>path路径为<code class="language-plaintext highlighter-rouge">lograge</code>根据规则生成的 <code class="language-plaintext highlighter-rouge">json</code> 日志路径</strong></p>
+
+<h4 id="在运维服务器安装并配置-logstash">在运维服务器安装并配置 <code class="language-plaintext highlighter-rouge">logstash</code></h4>
+<ul>
+  <li>安装 logstash <a href="https://www.elastic.co/guide/en/logstash/current/installing-logstash.html">点击教程</a></li>
+  <li><code class="language-plaintext highlighter-rouge">logstash.yml</code> 主要配置如下</li>
+</ul>
+
+<div class="language-json highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="err">input</span><span class="w"> </span><span class="p">{</span><span class="w">
+  </span><span class="err">beats</span><span class="w"> </span><span class="p">{</span><span class="w">
+
+    </span><span class="err">port</span><span class="w"> </span><span class="err">=&gt;</span><span class="w"> </span><span class="mi">5044</span><span class="w">
+  </span><span class="p">}</span><span class="w">
+</span><span class="p">}</span><span class="w">
+
+</span><span class="err">filter</span><span class="w"> </span><span class="p">{</span><span class="w">
+  </span><span class="err">if</span><span class="w"> </span><span class="p">[</span><span class="err">log_type</span><span class="p">]</span><span class="w"> </span><span class="err">==</span><span class="w"> </span><span class="s2">"application"</span><span class="w"> </span><span class="p">{</span><span class="w">
+    </span><span class="err">json</span><span class="w"> </span><span class="p">{</span><span class="w">
+      </span><span class="err">source</span><span class="w"> </span><span class="err">=&gt;</span><span class="w"> </span><span class="s2">"message"</span><span class="w">
+   </span><span class="p">}</span><span class="w">
+  </span><span class="p">}</span><span class="w">
+</span><span class="p">}</span><span class="w">
+
+</span><span class="err">output</span><span class="w"> </span><span class="p">{</span><span class="w">
+  </span><span class="err">stdout</span><span class="w"> </span><span class="p">{</span><span class="w">
+    </span><span class="err">codec</span><span class="w"> </span><span class="err">=&gt;</span><span class="w"> </span><span class="err">rubydebug</span><span class="w">
+  </span><span class="p">}</span><span class="w">
+
+  </span><span class="err">elasticsearch</span><span class="w"> </span><span class="p">{</span><span class="w">
+    </span><span class="err">index</span><span class="w"> </span><span class="err">=&gt;</span><span class="w"> </span><span class="s2">"%{[appname]}-%{[env]}-%{+YYYY.MM.dd}"</span><span class="w">
+    </span><span class="err">hosts</span><span class="w"> </span><span class="err">=&gt;</span><span class="w"> </span><span class="p">[</span><span class="err">'</span><span class="mf">127.0</span><span class="err">.</span><span class="mf">0.1</span><span class="err">:</span><span class="mi">9200</span><span class="err">'</span><span class="p">]</span><span class="w">
+  </span><span class="p">}</span><span class="w">
+</span><span class="p">}</span><span class="w">
+</span></code></pre></div></div>
+
+<h3 id="在运维服务器安装并配置elasticsearch和kibana即可">在运维服务器安装并配置elasticsearch和kibana即可</h3>
+
+<h2 id="参考文章">参考文章</h2>
+<ul>
+  <li><a href="https://www.ibm.com/developerworks/cn/opensource/os-cn-elk-filebeat/index.html">https://www.ibm.com/developerworks/cn/opensource/os-cn-elk-filebeat/index.html</a></li>
+  <li><a href="https://www.elastic.co/guide/index.html">https://www.elastic.co/guide/index.html</a></li>
+  <li><a href="https://www.elastic.co/guide/cn/kibana/current/index.html">https://www.elastic.co/guide/cn/kibana/current/index.html</a></li>
+</ul>
+
+
+        <hr>
+
+        <div class="clearfix">
+
+          
+          <a class="btn btn-primary float-left" href="/2018/11/05/rails-%E5%AE%9E%E7%8E%B0%E6%95%B0%E6%8D%AE%E5%BA%93-mysql-%E8%AF%BB%E5%86%99%E5%88%86%E7%A6%BB.html" data-toggle="tooltip" data-placement="top" title="Rails 实现数据库（Mysql）读写分离">&larr; Previous<span class="d-none d-md-inline">
+              Post</span></a>
+          
+          
+
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+<style>
+    img {
+        max-width: -webkit-fill-available;
+    }
+</style>
+
+  <!-- Footer -->
+
+<hr>
+
+<footer>
+  <div class="container">
+    <div class="row">
+      <div class="col-lg-8 col-md-10 mx-auto">
+        <ul class="list-inline text-center">
+          
+          <li class="list-inline-item">
+            <a href="mailto:xifengzhu520@gmail.com">
+              <span class="fa-stack fa-lg">
+                <i class="fas fa-circle fa-stack-2x"></i>
+                <i class="far fa-envelope fa-stack-1x fa-inverse"></i>
+              </span>
+            </a>
+          </li>
+          
+          
+          <li class="list-inline-item">
+            <a href="https://twitter.com/xifengzhu">
+              <span class="fa-stack fa-lg">
+                <i class="fas fa-circle fa-stack-2x"></i>
+                <i class="fab fa-twitter fa-stack-1x fa-inverse"></i>
+              </span>
+            </a>
+          </li>
+          
+          
+          
+          
+          <li class="list-inline-item">
+            <a href="https://github.com/xifengzhu">
+              <span class="fa-stack fa-lg">
+                <i class="fas fa-circle fa-stack-2x"></i>
+                <i class="fab fa-github fa-stack-1x fa-inverse"></i>
+              </span>
+            </a>
+          </li>
+          
+          
+        </ul>
+        <p class="copyright text-muted">Copyright &copy; xifengzhu 2024</p>
+      </div>
+    </div>
+  </div>
+</footer>
+
+
+  <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/assets/vendor/startbootstrap-clean-blog/js/scripts.js"></script>
+
+<script src="/assets/scripts.js"></script>
+
+
+
+
+  <!-- Global site tag (gtag.js) - Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id="></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', '');
+</script>
+
+
+
+</body>
+
+</html>

