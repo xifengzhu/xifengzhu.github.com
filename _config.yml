@@ -29,7 +29,8 @@ twitter_username: xifengzhu
 github_username:  xifengzhu
 
 # Build settings
-theme: StartBootstrap/startbootstrap-clean-blog-jekyll
+theme: jekyll-theme-clean-blog
+remote_theme: StartBootstrap/startbootstrap-clean-blog-jekyll
 plugins:
   - jekyll-feed
 
