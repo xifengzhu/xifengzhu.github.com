@@ -47,10 +47,25 @@ layout: default
           {% endif %}
 
         </div>
-
+        <div id="comment"></div>
       </div>
     </div>
   </div>
+
+<link rel="stylesheet" href="https://imsun.github.io/gitment/style/default.css">
+<script src="https://imsun.github.io/gitment/dist/gitment.browser.js"></script>
+<script>
+var gitment = new Gitment({
+  id: 'location.href', // 可选。默认为 location.href
+  owner: 'xifengzhu',
+  repo: 'https://github.com/xifengzhu/blog-comments.git',
+  oauth: {
+    client_id: 'Ov23li3WWBxAX8SVxtp4',
+    client_secret: '1f984f6d4e122fabe0a7780e21a861fcd5eb8bbf',
+  },
+})
+gitment.render('comment')
+</script>
 
 <style>
     img {
